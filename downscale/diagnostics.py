@@ -443,6 +443,8 @@ def _map_axes(fig, position, extent):
         return axis, False
     axis = fig.add_subplot(*position, projection=ccrs.PlateCarree())
     axis.set_extent(extent, crs=ccrs.PlateCarree())
+    # Plate carrée alone would draw a degree of longitude as long as one of latitude.
+    axis.set_aspect(1 / np.cos(np.deg2rad((extent[2] + extent[3]) / 2)))
     return axis, True
 
 
