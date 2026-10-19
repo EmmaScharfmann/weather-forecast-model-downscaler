@@ -11,11 +11,15 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import LinearSegmentedColormap
 
 #: One colour per forecast throughout the figures.
 COLOURS = {"AIFS-ENS": "tab:blue", "AIFS-ENS + downscaler": "tab:red", "CERRA": "tab:green",
            "CERRA (the floor)": "tab:green"}
 FRANCE_EXTENT = (-5.5, 10.0, 41.2, 51.4)
+#: Elevation colours, as on the Space: green lowlands, tan hills, white peaks; meant for 0 to 3000 m.
+TERRAIN_CMAP = LinearSegmentedColormap.from_list("terrain", [
+    (0, "#3b7d3b"), (0.1, "#8fbf62"), (0.25, "#e6dc9a"), (0.5, "#b8925e"), (0.75, "#8a6a52"), (1, "#f5f5f5")])
 
 
 def native_cells(field, lat2d: np.ndarray, lon2d: np.ndarray, land: np.ndarray | None = None) -> np.ndarray:
@@ -40,6 +44,17 @@ def native_cells(field, lat2d: np.ndarray, lon2d: np.ndarray, land: np.ndarray |
     j = np.abs(lon2d.ravel()[:, None] - lon[None]).argmin(1)
     out = np.asarray(field.transpose("lat", "lon").values)[i, j].reshape(lat2d.shape).astype("f8")
     return out if land is None else np.where(land, out, np.nan)
+
+
+def _shrink(extent: Sequence[float]) -> float:
+    """How much shorter a degree of longitude is than one of latitude at the centre of a map.
+
+    :param extent: ``(lon_min, lon_max, lat_min, lat_max)``.
+    :type extent: collections.abc.Sequence[float]
+    :returns: The cosine of the central latitude.
+    :rtype: float
+    """
+    return float(np.cos(np.deg2rad((extent[2] + extent[3]) / 2)))
 
 
 def _geo_axes(fig, n: int, extent: Sequence[float], ncols: int | None = None):
@@ -71,11 +86,14 @@ def _geo_axes(fig, n: int, extent: Sequence[float], ncols: int | None = None):
         for axis in axes:
             axis.set_xlim(extent[0], extent[1])
             axis.set_ylim(extent[2], extent[3])
-            axis.set_aspect(1 / np.cos(np.deg2rad((extent[2] + extent[3]) / 2)))
+            axis.set_aspect(1 / _shrink(extent))
         return axes, {}
     axes = [fig.add_subplot(*slot, projection=ccrs.PlateCarree()) for slot in slots]
     for axis in axes:
         axis.set_extent(extent, crs=ccrs.PlateCarree())
+        # Plate carrée draws a degree of longitude as long as one of latitude, which widens France
+        # by half; shortening it to its true length at the centre of the map undoes that.
+        axis.set_aspect(1 / _shrink(extent))
         axis.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.6, edgecolor="#333333")
         axis.add_feature(cfeature.BORDERS.with_scale("50m"), linewidth=0.4, edgecolor="#555555")
     return axes, {"transform": ccrs.PlateCarree()}
@@ -114,9 +132,7 @@ def maps(
     vmax = float(np.percentile(values, 99)) if vmax is None else vmax
     fig = plt.figure(layout="constrained")
     axes, kwargs = _geo_axes(fig, len(panels), extent)
-    # Plate carrée draws a degree of longitude as long as one of latitude; the fallback shrinks it.
-    squeeze = 1.0 if kwargs else np.cos(np.deg2rad((extent[2] + extent[3]) / 2))
-    aspect = (extent[3] - extent[2]) / ((extent[1] - extent[0]) * squeeze)
+    aspect = (extent[3] - extent[2]) / ((extent[1] - extent[0]) * _shrink(extent))
     fig.set_size_inches(width * len(panels) + 0.9, width * aspect + (0.6 if title else 0.3))
     for axis, (name, lon, lat, field) in zip(axes, panels):
         mesh = axis.pcolormesh(lon, lat, field, cmap=cmap, vmin=vmin, vmax=vmax, shading="auto", **kwargs)
@@ -150,8 +166,7 @@ def map_grid(
     """
     fig = plt.figure(layout="constrained")
     axes, kwargs = _geo_axes(fig, len(panels), extent, ncols)
-    squeeze = 1.0 if kwargs else np.cos(np.deg2rad((extent[2] + extent[3]) / 2))
-    aspect = (extent[3] - extent[2]) / ((extent[1] - extent[0]) * squeeze)
+    aspect = (extent[3] - extent[2]) / ((extent[1] - extent[0]) * _shrink(extent))
     nrows = -(-len(panels) // ncols)
     fig.set_size_inches((width + 1.0) * ncols, (width * aspect + 0.4) * nrows + (0.4 if title else 0))
     for axis, panel in zip(axes, panels):
@@ -241,8 +256,6 @@ def station_maps(
     :returns: The figure.
     :rtype: matplotlib.figure.Figure
     """
-    from matplotlib.colors import LinearSegmentedColormap
-
     lon, lat = np.asarray(lon), np.asarray(lat)
     gain = rmse[baseline] - rmse[improved]
     both = np.concatenate([rmse[baseline], rmse[improved]])
@@ -261,8 +274,7 @@ def station_maps(
     fig = plt.figure(layout="constrained")
     grid = fig.add_gridspec(2, 4)
     axes, kwargs = _geo_axes(fig, [grid[0, :2], grid[0, 2:], grid[1, 1:3]], extent)
-    squeeze = 1.0 if kwargs else np.cos(np.deg2rad((extent[2] + extent[3]) / 2))
-    aspect = (extent[3] - extent[2]) / ((extent[1] - extent[0]) * squeeze)
+    aspect = (extent[3] - extent[2]) / ((extent[1] - extent[0]) * _shrink(extent))
     fig.set_size_inches((width + 1.0) * 2, (width * aspect + 0.6) * 2 + (0.3 if title else 0))
     for axis, (values, name, cmap, vmin, vmax, label) in zip(axes, panels):
         ok = np.isfinite(values)
