@@ -17,6 +17,10 @@ from matplotlib.colors import LinearSegmentedColormap
 COLOURS = {"AIFS-ENS": "tab:blue", "AIFS-ENS + downscaler": "tab:red", "CERRA": "tab:green",
            "CERRA (the floor)": "tab:green"}
 FRANCE_EXTENT = (-5.5, 10.0, 41.2, 51.4)
+#: Temperature colours, as on the Space.
+TEMPERATURE_CMAP = "RdYlBu_r"
+#: Background where a map has no value, the masked sea mostly, as on the Space.
+SEA = "#e8eef3"
 #: Elevation colours, as on the Space: green lowlands, tan hills, white peaks; meant for 0 to 3000 m.
 TERRAIN_CMAP = LinearSegmentedColormap.from_list("terrain", [
     (0, "#3b7d3b"), (0.1, "#8fbf62"), (0.25, "#e6dc9a"), (0.5, "#b8925e"), (0.75, "#8a6a52"), (1, "#f5f5f5")])
@@ -87,6 +91,7 @@ def _geo_axes(fig, n: int, extent: Sequence[float], ncols: int | None = None):
             axis.set_xlim(extent[0], extent[1])
             axis.set_ylim(extent[2], extent[3])
             axis.set_aspect(1 / _shrink(extent))
+            axis.set_facecolor(SEA)
         return axes, {}
     axes = [fig.add_subplot(*slot, projection=ccrs.PlateCarree()) for slot in slots]
     for axis in axes:
@@ -94,13 +99,14 @@ def _geo_axes(fig, n: int, extent: Sequence[float], ncols: int | None = None):
         # Plate carrée draws a degree of longitude as long as one of latitude, which widens France
         # by half; shortening it to its true length at the centre of the map undoes that.
         axis.set_aspect(1 / _shrink(extent))
+        axis.set_facecolor(SEA)
         axis.add_feature(cfeature.COASTLINE.with_scale("50m"), linewidth=0.6, edgecolor="#333333")
         axis.add_feature(cfeature.BORDERS.with_scale("50m"), linewidth=0.4, edgecolor="#555555")
     return axes, {"transform": ccrs.PlateCarree()}
 
 
 def maps(
-    panels: Sequence[tuple[str, np.ndarray, np.ndarray, np.ndarray]], *, cmap: str = "RdYlBu_r",
+    panels: Sequence[tuple[str, np.ndarray, np.ndarray, np.ndarray]], *, cmap: str = TEMPERATURE_CMAP,
     vmin: float | None = None, vmax: float | None = None, label: str = "°C",
     extent: Sequence[float] = FRANCE_EXTENT, title: str | None = None, width: float = 5.2,
 ):
@@ -174,7 +180,7 @@ def map_grid(
         finite = values[np.isfinite(values)]
         vmin = panel.get("vmin", float(np.percentile(finite, 1)))
         vmax = panel.get("vmax", float(np.percentile(finite, 99)))
-        mesh = axis.pcolormesh(panel["lon"], panel["lat"], values, cmap=panel.get("cmap", "RdYlBu_r"),
+        mesh = axis.pcolormesh(panel["lon"], panel["lat"], values, cmap=panel.get("cmap", TEMPERATURE_CMAP),
                                vmin=vmin, vmax=vmax, shading="auto", **kwargs)
         axis.set_title(panel["title"], fontsize=12)
         fig.colorbar(mesh, ax=axis, label=panel.get("label", ""), shrink=0.9, pad=0.02)
