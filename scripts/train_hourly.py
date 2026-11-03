@@ -31,6 +31,7 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 import torch
+import xarray as xr
 
 from downscale import downscaler as dsc
 from downscale import hourly as hr
@@ -255,6 +256,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     coarse, fine = ds.coarse_t2m.values.astype("f4"), ds.fine_t2m.values.astype("f4")
     if coarse.shape[1:] != spatial.lat.shape:
         raise ValueError(f"pairs grid {coarse.shape[1:]} differs from the spatial model's {spatial.lat.shape}")
+    static_path = Path(args.pairs) / "static.zarr"
+    if static_path.exists():
+        pairs_static = xr.open_zarr(static_path)
+        offset = max(float(np.abs(pairs_static.lat.values - spatial.lat).max()),
+                     float(np.abs(pairs_static.lon.values - spatial.lon).max()))
+        if offset > 1e-3:
+            raise ValueError(f"pairs grid is {offset:.3f} degrees away from the spatial model's: crop the target alike")
     land = land_mask(spatial.static)
     land = np.ones(spatial.lat.shape, bool) if land is None else land
 
