@@ -15,12 +15,16 @@ reproduces the spatial model exactly and training only has to add the hours in b
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 
 from .constants import TIME_CHANNELS, channels
 from .downscaler import Config, Downscaler, DownscalerNet, time_features, to_kelvin
+
+if TYPE_CHECKING:
+    import xarray as xr
 
 #: Length of the coarse forecast step the model fills in [hours].
 WINDOW_HOURS = 6
@@ -137,6 +141,110 @@ def hourly_residual(baseline: np.ndarray, fine_k: np.ndarray, stats: dict) -> np
     return ((fine_k - baseline - residual["mean"]) / residual["std"]).astype("f4")
 
 
+def default_device() -> str:
+    """CUDA, then Apple's MPS, then the CPU.
+
+    :returns: Torch device name.
+    :rtype: str
+    """
+    mps = getattr(torch.backends, "mps", None)
+    return "cuda" if torch.cuda.is_available() else "mps" if mps and mps.is_available() else "cpu"
+
+
+def safe_load(path) -> dict:
+    """Read a checkpoint without unpickling arbitrary objects.
+
+    Checkpoints hold tensors, plain containers and the numpy arrays of the static fields, so only the
+    numpy types needed to rebuild those arrays are allowed; anything else fails instead of running.
+
+    :param path: Checkpoint file.
+    :type path: str | pathlib.Path
+    :returns: The checkpoint.
+    :rtype: dict
+    """
+    core = getattr(np, "_core", None) or np.core
+    reconstruct = core.multiarray._reconstruct
+    dtypes = {type(np.dtype(code)) for code in ("f2", "f4", "f8", "i1", "i2", "i4", "i8", "u1", "?")}
+    allowed = [
+        (reconstruct, "numpy.core.multiarray._reconstruct"),
+        (reconstruct, "numpy._core.multiarray._reconstruct"),
+        np.ndarray, np.dtype, *dtypes,
+    ]
+    with torch.serialization.safe_globals(allowed):
+        return torch.load(path, map_location="cpu", weights_only=True)
+
+
+def load_spatial(path, device: str | None = None) -> Downscaler:
+    """Read a spatial model's checkpoint with :func:`safe_load`.
+
+    :param path: Checkpoint file.
+    :type path: str | pathlib.Path
+    :param device: Torch device; ``None`` picks :func:`default_device`.
+    :type device: str | None
+    :returns: Model ready for inference.
+    :rtype: downscale.downscaler.Downscaler
+    :raises ValueError: If the checkpoint's channels differ from this code's.
+    """
+    checkpoint = safe_load(path)
+    known = {f.name for f in fields(Config)}
+    cfg = Config(**{k: v for k, v in checkpoint["config"].items() if k in known})
+    if checkpoint["channels"] != cfg.channels:
+        raise ValueError(f"checkpoint channels {checkpoint['channels']} differ from this code's {cfg.channels}")
+    net = DownscalerNet(cfg)
+    net.load_state_dict(checkpoint["state_dict"])
+    return Downscaler(net, checkpoint["stats"], checkpoint["static"], device or default_device())
+
+
+def window_samples(times) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Find, for every hour, the two coarse steps of the window around it.
+
+    Windows start at 00, 06, 12 and 18 UTC, the steps of the coarse forecast. An hour is kept only when
+    both ends of its window are present.
+
+    :param times: Hourly times, sorted.
+    :type times: numpy.ndarray | collections.abc.Sequence
+    :returns: The index of each kept hour, of the start and of the end of its window.
+    :rtype: tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]
+    """
+    t = np.asarray(times, "datetime64[h]")
+    position = {value: i for i, value in enumerate(t.tolist())}
+    hours, starts, ends = [], [], []
+    for i, value in enumerate(t):
+        offset = int((value - value.astype("datetime64[D]")) / np.timedelta64(1, "h")) % WINDOW_HOURS
+        start = value - np.timedelta64(offset, "h")
+        j, k = position.get(start.tolist()), position.get((start + np.timedelta64(WINDOW_HOURS, "h")).tolist())
+        if j is not None and k is not None:
+            hours.append(i), starts.append(j), ends.append(k)
+    return np.array(hours, int), np.array(starts, int), np.array(ends, int)
+
+
+def offsets_of(times) -> np.ndarray:
+    """Hours since the start of the 6-hour window, from 0 to 5.
+
+    :param times: Times.
+    :type times: numpy.ndarray | collections.abc.Sequence
+    :returns: The offsets.
+    :rtype: numpy.ndarray
+    """
+    t = np.asarray(times, "datetime64[h]")
+    return ((t - t.astype("datetime64[D]")) / np.timedelta64(1, "h")).astype(int) % WINDOW_HOURS
+
+
+def hourly_leads(forecast: "xr.DataArray", step_hours: int = 1) -> "xr.DataArray":
+    """Interpolate a forecast in time onto every hour between its first and last lead times.
+
+    :param forecast: Forecast with a ``lead_time`` dimension.
+    :type forecast: xarray.DataArray
+    :param step_hours: Spacing of the new lead times.
+    :type step_hours: int
+    :returns: The straight-line forecast at every hour.
+    :rtype: xarray.DataArray
+    """
+    leads = forecast["lead_time"].values
+    hourly = np.arange(leads[0], leads[-1] + np.timedelta64(1, "h"), np.timedelta64(step_hours, "h"))
+    return forecast.interp(lead_time=hourly.astype(leads.dtype))
+
+
 def init_from_spatial(net: HourlyNet, spatial_checkpoint: str) -> None:
     """Start an hourly network from the spatial model's weights, with the new channels switched off.
 
@@ -150,7 +258,7 @@ def init_from_spatial(net: HourlyNet, spatial_checkpoint: str) -> None:
     :returns: ``None``
     :rtype: None
     """
-    state = torch.load(spatial_checkpoint, map_location="cpu", weights_only=False)["state_dict"]
+    state = safe_load(spatial_checkpoint)["state_dict"]
     target = net.state_dict()
     n_spatial = len(channels(net.cfg.coast_distance))
     for name, weight in state.items():
@@ -175,14 +283,14 @@ class HourlyDownscaler(Downscaler):
 
         :param path: Checkpoint file.
         :type path: str | pathlib.Path
-        :param device: Torch device; ``None`` selects CUDA when available.
+        :param device: Torch device; ``None`` picks :func:`default_device`.
         :type device: str | None
         :returns: Model ready for inference.
         :rtype: HourlyDownscaler
         :raises ValueError: If the checkpoint's channels differ from this code's.
         """
-        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+        device = device or default_device()
+        checkpoint = safe_load(path)
         known = {f.name for f in fields(HourlyConfig)}
         cfg = HourlyConfig(**{k: v for k, v in checkpoint["config"].items() if k in known})
         if checkpoint["channels"] != cfg.channels:
