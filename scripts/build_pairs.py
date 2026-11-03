@@ -394,10 +394,14 @@ def main(argv: Sequence[str] | None = None, source=None, geopotential=None) -> i
     parser.add_argument("--out", default=None, help="overrides paths.pairs")
     parser.add_argument("--batch", type=int, default=None, help="overrides coarse.fetch_batch")
     parser.add_argument("--consolidate", action="store_true")
+    parser.add_argument("--coarse-source", choices=["era5", "era5-arco"], default=None,
+                        help="overrides coarse.source; era5-arco reads Google's public copy, no account needed")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     cfg = load_config(args.config)
+    if args.coarse_source:
+        cfg.coarse.source = args.coarse_source
     target_dir = Path(args.target or cfg.paths.target)
     out = Path(args.out or cfg.paths.pairs)
 
@@ -407,11 +411,11 @@ def main(argv: Sequence[str] | None = None, source=None, geopotential=None) -> i
 
     static = xr.open_zarr(target_dir / "static.zarr")
     if source is None or geopotential is None:
-        if cfg.coarse.source != "era5":
-            raise ValueError(f"coarse.source {cfg.coarse.source!r} is not supported; only 'era5' is")
-        from downscale.sources import ERA5
+        if cfg.coarse.source not in ("era5", "era5-arco"):
+            raise ValueError(f"coarse.source {cfg.coarse.source!r} is not supported; use 'era5' or 'era5-arco'")
+        from downscale.sources import ERA5, open_arco_era5
 
-        era5 = ERA5()
+        era5 = ERA5(dataset=open_arco_era5()) if cfg.coarse.source == "era5-arco" else ERA5()
         source = source or era5
         geopotential = geopotential if geopotential is not None else era5.surface_geopotential()
     coarse = CoarseOnTargetGrid(
