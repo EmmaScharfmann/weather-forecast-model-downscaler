@@ -1,5 +1,7 @@
 """Tests for the hourly downscaler: the fields in a 6-hour window, the inputs it is given and its checkpoint."""
 
+import json
+
 import numpy as np
 import pytest
 
@@ -100,3 +102,63 @@ def test_checkpoint_round_trip_and_the_spatial_checkpoint_is_refused(tmp_path, s
     spatial_model(static_fields, hourly_stats).save(tmp_path / "spatial.pt")
     with pytest.raises(ValueError, match="channels"):
         hourly.HourlyDownscaler.load(tmp_path / "spatial.pt", device="cpu")
+
+
+def test_each_hour_is_paired_with_the_coarse_steps_around_it():
+    times = np.arange(np.datetime64("2020-07-01T00"), np.datetime64("2020-07-01T14"), np.timedelta64(1, "h"))
+    hours, starts, ends = hourly.window_samples(times.astype("datetime64[ns]"))
+    assert list(hours) == list(range(12))  # 12 and 13 lack the 18 UTC step
+    assert list(starts) == [0] * 6 + [6] * 6 and list(ends) == [6] * 6 + [12] * 6
+    assert list(hourly.offsets_of(times[hours])) == list(range(6)) * 2
+
+
+def test_forecast_leads_are_filled_with_the_straight_line():
+    import xarray as xr
+
+    leads = np.array([6, 12, 18], "timedelta64[h]").astype("timedelta64[ns]")
+    forecast = xr.DataArray(np.array([280.0, 286.0, 280.0]), dims="lead_time", coords={"lead_time": leads})
+    filled = hourly.hourly_leads(forecast)
+    assert filled.sizes["lead_time"] == 13
+    assert np.allclose(filled.values[:7], 280.0 + np.arange(7))
+
+
+def test_checkpoints_holding_arbitrary_objects_are_refused(tmp_path):
+    torch.save({"state_dict": {}, "extra": tmp_path}, tmp_path / "odd.pt")
+    with pytest.raises(Exception):
+        hourly.safe_load(tmp_path / "odd.pt")
+
+
+def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_path, static_fields, stats):
+    import sys
+    from pathlib import Path
+
+    import xarray as xr
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import train_hourly
+    from conftest import diurnal
+
+    spatial = spatial_model(static_fields, stats, loss="crps")
+    spatial.save(tmp_path / "spatial.pt")
+    times = np.arange(np.datetime64("2020-07-01T00"), np.datetime64("2020-07-05T01"), np.timedelta64(1, "h"))
+    hour = ((times - times.astype("datetime64[D]")) / np.timedelta64(1, "h"))[:, None, None]
+    fine = 290 + diurnal(hour) - 0.0065 * static_fields["cerra_orography"][None]
+    coarse = 290 + diurnal(hour) - 0.0065 * static_fields["era5_orography"][None]
+    pairs = tmp_path / "pairs"
+    xr.Dataset(
+        {"coarse_t2m": (("time", "y", "x"), coarse.astype("f4")), "fine_t2m": (("time", "y", "x"), fine.astype("f4"))},
+        coords={"time": times.astype("datetime64[ns]")},
+    ).to_zarr(pairs / "pairs.zarr")
+    out = tmp_path / "run"
+    status = train_hourly.main([
+        "--pairs", str(pairs), "--spatial", str(tmp_path / "spatial.pt"), "--out", str(out),
+        "--epochs", "1", "--max-steps-per-epoch", "2", "--batch-size", "4", "--eval-members", "2",
+        "--val-start", "2020-07-04", "--device", "cpu",
+    ])
+    assert status == 0
+    report = json.loads((out / "val_report.json").read_text())
+    assert set(report) >= {"line", "spatial", "hourly"}
+    assert {f"land_+{k}h" for k in range(6)} <= set(report["hourly"])
+    assert (out / "hourly_scores.png").exists()
+    restored = hourly.HourlyDownscaler.load(out / "model.pt", device="cpu")
+    assert restored.stats["tendency"]["std"] > 0
