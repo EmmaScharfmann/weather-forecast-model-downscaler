@@ -106,6 +106,33 @@ def observed(cfg, valid: pd.DatetimeIndex) -> xr.Dataset:
     return stations.assign(t2m=stations["t2m"] - 273.15)
 
 
+def coarse_land(coarse_lat: np.ndarray, coarse_lon: np.ndarray, lat: np.ndarray, lon: np.ndarray,
+                land: np.ndarray) -> np.ndarray:
+    """Land on the coarse grid, from the nearest point of the fine grid; points off the fine grid are not land.
+
+    :param coarse_lat: Coarse latitudes.
+    :type coarse_lat: numpy.ndarray
+    :param coarse_lon: Coarse longitudes.
+    :type coarse_lon: numpy.ndarray
+    :param lat: Fine latitudes over ``(y, x)``.
+    :type lat: numpy.ndarray
+    :param lon: Fine longitudes over ``(y, x)``.
+    :type lon: numpy.ndarray
+    :param land: Fine land mask.
+    :type land: numpy.ndarray
+    :returns: Coarse land mask over ``(lat, lon)``.
+    :rtype: numpy.ndarray
+    """
+    from scipy.spatial import cKDTree
+
+    scale = np.cos(np.radians(lat.mean()))
+    tree = cKDTree(np.column_stack([lat.ravel(), lon.ravel() * scale]))
+    grid_lat, grid_lon = np.meshgrid(coarse_lat, coarse_lon, indexing="ij")
+    distance, index = tree.query(np.column_stack([grid_lat.ravel(), grid_lon.ravel() * scale]))
+    # Fine points are ~0.05 degrees apart: anything farther than that is off the fine grid.
+    return (land.ravel()[index] & (distance < 0.1)).reshape(grid_lat.shape)
+
+
 def render(
     data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=PARIS, sea: bool = False
 ) -> Path:
@@ -121,17 +148,18 @@ def render(
     :type fps: int
     :param point: ``(lat, lon)`` followed in the strip under the maps.
     :type point: tuple[float, float]
-    :param sea: Also draw the downscaled fields over the sea, where the models are not trained.
+    :param sea: Also draw the fields over the sea, where the models are not trained.
     :type sea: bool
     :returns: The output file.
     :rtype: pathlib.Path
     """
     valid, lat, lon, land = data["valid"], data["lat"], data["lon"], data["land"]
     vmin, vmax = np.percentile(data["hourly"][:, land], [1, 99.5])
-    # The loss only covers land, so the downscaled fields mean nothing over the sea.
-    shown = (lambda f: f) if sea else (lambda f: np.where(land, f, np.nan))
+    # The loss only covers land, so the downscaled fields mean nothing over the sea; hide it everywhere alike.
+    shown = (lambda f, mask=land: f) if sea else (lambda f, mask=land: np.where(mask, f, np.nan))
+    coarse_mask = coarse_land(data["coarse_lat"], data["coarse_lon"], lat, lon, land)
     panels = [
-        ("AIFS-ENS 0.25°, linear in time", data["coarse_lon"], data["coarse_lat"], data["coarse"]),
+        ("AIFS-ENS 0.25°, linear in time", data["coarse_lon"], data["coarse_lat"], shown(data["coarse"], coarse_mask)),
         ("spatial model, linear in time", lon, lat, shown(data["spatial"])),
         ("hourly model", lon, lat, shown(data["hourly"])),
     ]
@@ -219,7 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--hours", type=int, default=None, help="only the first so many hours")
     parser.add_argument("--fps", type=int, default=8)
     parser.add_argument("--stations", action="store_true", help="add the observed station values")
-    parser.add_argument("--show-sea", action="store_true", help="draw the downscaled fields over the sea too")
+    parser.add_argument("--show-sea", action="store_true", help="draw the fields over the sea too")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
