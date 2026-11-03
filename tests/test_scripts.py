@@ -155,6 +155,26 @@ def test_hourly_download_fills_the_hours_between_analyses_from_forecasts(config,
     assert sorted(r["product_type"] for r in client.requests[-2:]) == ["analysis", "forecast"]
 
 
+def test_a_published_crop_is_adopted_and_a_conflicting_one_refused(config, fake_cds, tmp_path):
+    client, opener = fake_cds
+    published = tmp_path / "published"
+    published.mkdir()
+    out = Path(config.paths.target)
+    out.mkdir(parents=True)
+    download_cerra.do_static(config, out, client=client, opener=opener)
+    crop = json.loads((out / "crop.json").read_text())
+    smaller = {**crop, "y0": crop["y0"] + 1, "x1": crop["x1"] - 1}
+    (published / "manifest.json").write_text(json.dumps({"crop": smaller}))
+    with pytest.raises(ValueError, match="different crop"):
+        download_cerra.adopt_crop(out, str(published))
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    download_cerra.adopt_crop(fresh, str(published))
+    download_cerra.do_static(config, fresh, client=client, opener=opener)
+    static = xr.open_zarr(fresh / "static.zarr")
+    assert (static.sizes["y"], static.sizes["x"]) == (smaller["y1"] - smaller["y0"], smaller["x1"] - smaller["x0"])
+
+
 def test_download_flags_a_month_with_missing_times(config, fake_cds):
     client, opener = fake_cds
     out = Path(config.paths.target)

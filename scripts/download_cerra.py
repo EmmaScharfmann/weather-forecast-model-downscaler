@@ -314,6 +314,31 @@ def load_or_make_crop(out: Path, standardised: xr.Dataset, box) -> dict:
     return crop
 
 
+def adopt_crop(out: Path, like: str) -> dict:
+    """Use the crop of a published dataset, so a new download lands on the same grid.
+
+    :param out: Output directory.
+    :type out: pathlib.Path
+    :param like: Local folder or Hub dataset whose ``manifest.json`` records its crop.
+    :type like: str
+    :returns: The crop, written to ``crop.json``.
+    :rtype: dict
+    :raises ValueError: If the dataset records no crop, or this download already has a different one.
+    """
+    from downscale.fetch import _manifest
+
+    manifest = _manifest(like)
+    if not manifest or "crop" not in manifest:
+        raise ValueError(f"{like} records no crop in its manifest")
+    crop = manifest["crop"]
+    path = out / "crop.json"
+    if path.exists() and json.loads(path.read_text()) != crop:
+        raise ValueError(f"{path} holds a different crop than {like}: use a fresh output directory")
+    path.write_text(json.dumps(crop, indent=2))
+    logger.info("using the crop of %s: y %d:%d, x %d:%d", like, crop["y0"], crop["y1"], crop["x0"], crop["x1"])
+    return crop
+
+
 def do_static(cfg: Config, out: Path, client=None, opener: Callable = open_grib) -> Path:
     """Download and crop the time-invariant fields.
 
@@ -533,12 +558,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--hourly", action="store_true", help="fetch every hour instead of target.times")
     parser.add_argument("--start", default=None, help="first day, overriding target.years")
     parser.add_argument("--end", default=None, help="last day, overriding target.years")
+    parser.add_argument(
+        "--crop-like", default=None, metavar="DATASET",
+        help="take the crop from a published dataset's manifest, e.g. EmmaScharfmann/cerra-france-t2m-2016-2020, "
+        "so the grid matches models trained on it",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     cfg = load_config(args.config)
     out = Path(args.out or cfg.paths.target)
     out.mkdir(parents=True, exist_ok=True)
+    if args.crop_like:
+        adopt_crop(out, args.crop_like)
     workers = args.workers or cfg.target.cds_workers
     first, last = int(cfg.target.years[0]), int(cfg.target.years[1])
     months = [(y, m) for y in range(first, last + 1) for m in range(1, 13)]
