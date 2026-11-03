@@ -10,7 +10,8 @@ one store per initialisation, which ``downscale_forecasts.py`` and
 ``eval_downscaled.py`` then pick up. Initialisations already fetched are skipped.
 
 Reading from Earthmover needs an account: run ``arraylake auth login`` or set
-``ARRAYLAKE_TOKEN``.
+``ARRAYLAKE_TOKEN``. ``--source open-data`` reads ECMWF's open data instead,
+which needs no account and holds every run since mid-2025.
 """
 
 from __future__ import annotations
@@ -25,9 +26,11 @@ import pandas as pd
 
 from downscale.config import load_config
 from downscale.constants import COARSE_CROP_MARGIN_DEG
+from downscale.open_data import fetch_open_data
 from downscale.sources import available_inits, fetch_forecast, forecast_box, open_forecasts, save_forecast, store_name
 
 logger = logging.getLogger("fetch")
+OPEN_DATA = "open-data"
 
 
 def select_inits(available: pd.DatetimeIndex, start, end, hours: Sequence[int] | None) -> pd.DatetimeIndex:
@@ -68,7 +71,7 @@ def main(argv: Sequence[str] | None = None, archive=None) -> int:
     parser.add_argument("--config", default=None)
     parser.add_argument("--start", required=True, help="first initialisation")
     parser.add_argument("--end", required=True, help="last initialisation")
-    parser.add_argument("--source", default=None, help="overrides forecasts.source")
+    parser.add_argument("--source", default=None, help=f"overrides forecasts.source; {OPEN_DATA!r} reads ECMWF open data")
     parser.add_argument("--members", type=int, default=None, help="overrides forecasts.members")
     parser.add_argument("--max-lead-hours", type=int, default=None, help="overrides forecasts.max_lead_hours")
     parser.add_argument("--out", default=None, help="overrides paths.forecasts")
@@ -77,8 +80,15 @@ def main(argv: Sequence[str] | None = None, archive=None) -> int:
 
     cfg = load_config(args.config)
     out = Path(args.out or cfg.paths.forecasts)
-    ds = archive if archive is not None else open_forecasts(args.source or cfg.forecasts.source)
-    inits = select_inits(available_inits(ds), args.start, args.end, cfg.forecasts.init_hours)
+    source = args.source or cfg.forecasts.source
+    open_data = source == OPEN_DATA and archive is None
+    if open_data:
+        available = pd.date_range(pd.Timestamp(args.start).floor("D"), pd.Timestamp(args.end).ceil("D"), freq="6h")
+        ds = None
+    else:
+        ds = archive if archive is not None else open_forecasts(source)
+        available = available_inits(ds)
+    inits = select_inits(available, args.start, args.end, cfg.forecasts.init_hours)
     if inits.empty:
         parser.error(f"no complete initialisation between {args.start} and {args.end} in the archive")
     box = forecast_box(cfg.region_box, COARSE_CROP_MARGIN_DEG)
@@ -90,7 +100,10 @@ def main(argv: Sequence[str] | None = None, archive=None) -> int:
         if Path(str(out / store_name(init)) + ".done").exists():
             logger.info("skipping %s, already fetched", init)
             continue
-        forecast = fetch_forecast(ds, init, box, cfg.forecasts.variable, members, max_lead)
+        if open_data:
+            forecast = fetch_open_data(init, box, cfg.forecasts.variable, members, max_lead or 360)
+        else:
+            forecast = fetch_forecast(ds, init, box, cfg.forecasts.variable, members, max_lead)
         logger.info("wrote %s", save_forecast(forecast, out))
         written += 1
     print(f"\n{len(inits)} initialisation(s) in {out}/, {written} fetched now")
