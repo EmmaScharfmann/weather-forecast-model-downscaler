@@ -487,3 +487,11 @@ def test_hourly_forecasts_are_written_for_every_hour_and_scored_against_stations
     by_lead = pd.read_csv(tmp_path / "eval" / "by_lead.csv")
     assert sorted(by_lead.lead_h.unique())[:3] == [6, 7, 8]
     assert np.isfinite(summary["rmse_K"]["downscaled"])
+
+    import movie_hourly
+
+    movie = tmp_path / "movie.gif"
+    status = movie_hourly.main([
+        "--config", str(config_path), "--run", str(out), "--name", name, "--hours", "3", "--out", str(movie),
+    ])
+    assert status == 0 and movie.stat().st_size > 0

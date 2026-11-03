@@ -56,6 +56,7 @@ For hourly output between the 6-hourly steps:
 | Fetch AIFS-ENS from ECMWF open data, no account needed | `scripts/fetch_forecasts.py --source open-data --start ... --end ...` |
 | Downscale every hour, with the spatial model as baseline | `scripts/downscale_hourly.py --hourly runs/hourly/model.pt --spatial runs/crps/model.pt` |
 | Score each against stations | `scripts/eval_downscaled.py --forecasts outputs/hourly/forecasts/*.zarr --downscaled outputs/hourly/hourly/*.zarr` |
+| Animate one forecast hour by hour, next to the stations | `scripts/movie_hourly.py --run outputs/hourly --stations` |
 
 The hourly pairs must be on the same grid as the spatial model, which `--crop-like` takes care of for the published one; `train_hourly.py` refuses them otherwise.
 

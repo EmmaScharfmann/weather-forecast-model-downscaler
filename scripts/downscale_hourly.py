@@ -205,6 +205,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if not forecasts:
         parser.error("no forecasts found; pass --forecasts or set paths.forecasts")
+    clash = [p for p in forecasts if Path(p).resolve().parent == (Path(args.out) / "forecasts").resolve()]
+    if clash:
+        parser.error(f"{clash[0]} would be overwritten by its hourly version; pick another --out")
     hourly = hr.HourlyDownscaler.load(args.hourly, args.device)
     spatial = hr.load_spatial(args.spatial, args.device)
     samples = args.samples or cfg.inference.samples
