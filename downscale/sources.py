@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 ERA5_REPO = "earthmover-public/era5"
 #: Google's public copy of ERA5 (ARCO), hourly from 1940, readable without an account.
-ERA5_ARCO = "https://storage.googleapis.com/gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+ERA5_ARCO = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 #: Earthmover marketplace listing of AIFS-ENS 1.0; subscribing creates a repository under your organisation.
 AIFS_ENS_LISTING = "https://app.earthmover.io/marketplace/6a10729e8a69e6bcaeae0f90"
 #: Forecasts this long after initialisation without an ingestion record are assumed complete.
@@ -87,7 +87,9 @@ def open_arco_era5(url: str = ERA5_ARCO, variables: Sequence[str] = ("2m_tempera
     :rtype: xarray.Dataset
     """
     logger.info("opening ERA5 from %s", url)
-    ds = xr.open_zarr(url, consolidated=True, chunks=None)
+    # Through gcsfs, which backs off when the bucket answers 429 to the many one-hour chunks of a month.
+    options = {"token": "anon"} if url.startswith("gs://") else None
+    ds = xr.open_zarr(url, consolidated=True, chunks=None, storage_options=options)
     # The surface geopotential is stored at every time but empty at early ones; any filled step will do.
     surface = ds["geopotential_at_surface"].sel(time="2000-01-01T00:00", drop=True)
     return ds[list(variables)].assign_coords(geopotential_at_surface=surface)
