@@ -162,3 +162,35 @@ def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_p
     assert (out / "hourly_scores.png").exists()
     restored = hourly.HourlyDownscaler.load(out / "model.pt", device="cpu")
     assert restored.stats["tendency"]["std"] > 0
+
+    import check_hourly_spectrum
+
+    status = check_hourly_spectrum.main([
+        "--pairs", str(pairs), "--hourly", str(out / "model.pt"), "--spatial", str(tmp_path / "spatial.pt"),
+        "--val-start", "2020-07-04", "--members", "2", "--device", "cpu",
+    ])
+    assert status == 0
+    summary = json.loads((out / "hourly_spectrum.json").read_text())
+    assert summary["hours"] == 24
+    assert (out / "hourly_spectrum.png").exists()
+
+
+def test_temporal_spectrum_sees_noise_redrawn_every_hour():
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from check_hourly_spectrum import longest_run, temporal_spectrum
+
+    hours = np.arange(96, dtype=float)[:, None, None]
+    smooth = np.sin(2 * np.pi * hours / 24) * np.ones((1, 4, 4))
+    noisy = smooth + np.random.default_rng(0).normal(0, 0.5, smooth.shape)
+    spectrum = temporal_spectrum({"target": smooth, "noisy": noisy}, np.ones((4, 4), bool))
+    short = spectrum.period_h <= 4
+    assert (spectrum.noisy[short] > 100 * spectrum.target[short]).all()
+    daily = spectrum.iloc[(spectrum.period_h - 24).abs().argmin()]
+    assert daily.noisy == pytest.approx(daily.target, rel=0.2)
+
+    times = np.array(["2020-01-01T00", "2020-01-01T01", "2020-01-01T05", "2020-01-01T06", "2020-01-01T07"],
+                     "datetime64[h]")
+    assert longest_run(times) == slice(2, 5)

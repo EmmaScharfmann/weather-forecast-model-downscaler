@@ -57,6 +57,7 @@ For hourly output between the 6-hourly steps:
 | Downscale every hour, with the spatial model as baseline | `scripts/downscale_hourly.py --hourly runs/hourly/model.pt --spatial runs/crps/model.pt` |
 | Score each against stations | `scripts/eval_downscaled.py --forecasts outputs/hourly/forecasts/*.zarr --downscaled outputs/hourly/hourly/*.zarr` |
 | Animate one forecast hour by hour, next to the stations | `scripts/movie_hourly.py --run outputs/hourly --stations` |
+| Power spectra in space and time against CERRA | `scripts/check_hourly_spectrum.py --pairs data/pairs_hourly --hourly runs/hourly/model.pt --spatial runs/crps/model.pt --val-start 2020-08-01` |
 
 The hourly pairs must be on the same grid as the spatial model, which `--crop-like` takes care of for the published one; `train_hourly.py` refuses them otherwise.
 
