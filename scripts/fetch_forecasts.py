@@ -83,7 +83,8 @@ def main(argv: Sequence[str] | None = None, archive=None) -> int:
     source = args.source or cfg.forecasts.source
     open_data = source == OPEN_DATA and archive is None
     if open_data:
-        available = pd.date_range(pd.Timestamp(args.start).floor("D"), pd.Timestamp(args.end).ceil("D"), freq="6h")
+        first, last = pd.Timestamp(args.start).floor("D"), pd.Timestamp(args.end).floor("D") + pd.Timedelta(days=1)
+        available = pd.date_range(first, last, freq="6h", inclusive="left")
         ds = None
     else:
         ds = archive if archive is not None else open_forecasts(source)
