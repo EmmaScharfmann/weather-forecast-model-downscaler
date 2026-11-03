@@ -133,9 +133,7 @@ def coarse_land(coarse_lat: np.ndarray, coarse_lon: np.ndarray, lat: np.ndarray,
     return (land.ravel()[index] & (distance < 0.1)).reshape(grid_lat.shape)
 
 
-def render(
-    data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=PARIS, sea: bool = False
-) -> Path:
+def render(data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=PARIS) -> Path:
     """Write the animation.
 
     :param data: Fields from :func:`frames`.
@@ -148,15 +146,15 @@ def render(
     :type fps: int
     :param point: ``(lat, lon)`` followed in the strip under the maps.
     :type point: tuple[float, float]
-    :param sea: Also draw the fields over the sea, where the models are not trained.
-    :type sea: bool
     :returns: The output file.
     :rtype: pathlib.Path
     """
     valid, lat, lon, land = data["valid"], data["lat"], data["lon"], data["land"]
     vmin, vmax = np.percentile(data["hourly"][:, land], [1, 99.5])
     # The loss only covers land, so the downscaled fields mean nothing over the sea; hide it everywhere alike.
-    shown = (lambda f, mask=land: f) if sea else (lambda f, mask=land: np.where(mask, f, np.nan))
+    def shown(field: np.ndarray, mask: np.ndarray = land) -> np.ndarray:
+        return np.where(mask, field, np.nan)
+
     coarse_mask = coarse_land(data["coarse_lat"], data["coarse_lon"], lat, lon, land)
     panels = [
         ("AIFS-ENS 0.25°, linear in time", data["coarse_lon"], data["coarse_lat"], shown(data["coarse"], coarse_mask)),
@@ -247,7 +245,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--hours", type=int, default=None, help="only the first so many hours")
     parser.add_argument("--fps", type=int, default=8)
     parser.add_argument("--stations", action="store_true", help="add the observed station values")
-    parser.add_argument("--show-sea", action="store_true", help="draw the fields over the sea too")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
@@ -259,7 +256,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         data = {k: v[: args.hours] if k in ("valid", "coarse", "spatial", "hourly") else v for k, v in data.items()}
     stations = observed(cfg, data["valid"]) if args.stations else None
     out = Path(args.out or run / (Path(name).stem + ".mp4"))
-    render(data, stations, out, args.fps, sea=args.show_sea)
+    render(data, stations, out, args.fps)
     print(f"{len(data['valid'])} frames written to {out}")
     return 0
 
