@@ -194,15 +194,19 @@ def figures(out: Path, report: dict, history: list[dict], series: dict) -> None:
 
 
 def point_series(model: hr.HourlyDownscaler, coarse, fine, times, hours, starts, ends, land, days: int = 3) -> dict:
-    """The truth, the line and the hourly model's mean at the land point of highest daily range.
+    """The truth, the line and the hourly model's mean at a land point with a large but typical daily range.
+
+    The point at the 90th percentile of the range is used rather than the largest, which tends to be a
+    jump in the target rather than weather.
 
     :returns: Times and values over the first ``days`` days of the validation hours.
     :rtype: dict
     """
     h, s, e = hours[: 24 * days], starts[: 24 * days], ends[: 24 * days]
     truth = fine[h]
-    daily_range = np.where(land, truth.max(0) - truth.min(0), -np.inf)
-    y, x = np.unravel_index(int(np.argmax(daily_range)), daily_range.shape)
+    daily_range = np.where(land, truth.max(0) - truth.min(0), np.nan)
+    target = np.nanpercentile(daily_range, 90)
+    y, x = np.unravel_index(int(np.nanargmin(np.abs(daily_range - target))), daily_range.shape)
     offsets = hr.offsets_of(times[h])
     pred = model.predict_hours(coarse[s], coarse[e], offsets, times[h], members=4)
     line = hr.temporal_interpolation(coarse[s], coarse[e], offsets)
