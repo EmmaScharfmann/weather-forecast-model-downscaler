@@ -106,7 +106,9 @@ def observed(cfg, valid: pd.DatetimeIndex) -> xr.Dataset:
     return stations.assign(t2m=stations["t2m"] - 273.15)
 
 
-def render(data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=PARIS) -> Path:
+def render(
+    data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=PARIS, sea: bool = False
+) -> Path:
     """Write the animation.
 
     :param data: Fields from :func:`frames`.
@@ -119,15 +121,19 @@ def render(data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=P
     :type fps: int
     :param point: ``(lat, lon)`` followed in the strip under the maps.
     :type point: tuple[float, float]
+    :param sea: Also draw the downscaled fields over the sea, where the models are not trained.
+    :type sea: bool
     :returns: The output file.
     :rtype: pathlib.Path
     """
     valid, lat, lon, land = data["valid"], data["lat"], data["lon"], data["land"]
     vmin, vmax = np.percentile(data["hourly"][:, land], [1, 99.5])
+    # The loss only covers land, so the downscaled fields mean nothing over the sea.
+    shown = (lambda f: f) if sea else (lambda f: np.where(land, f, np.nan))
     panels = [
         ("AIFS-ENS 0.25°, linear in time", data["coarse_lon"], data["coarse_lat"], data["coarse"]),
-        ("spatial model, linear in time", lon, lat, data["spatial"]),
-        ("hourly model", lon, lat, data["hourly"]),
+        ("spatial model, linear in time", lon, lat, shown(data["spatial"])),
+        ("hourly model", lon, lat, shown(data["hourly"])),
     ]
     n_maps = len(panels) + (stations is not None)
     fig = plt.figure(figsize=(4.6 * n_maps, 6.6))
@@ -136,7 +142,7 @@ def render(data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=P
     aspect = 1 / np.cos(np.radians(lat.mean()))
     meshes, axes = [], []
     for k, (title, x, y, field) in enumerate(panels):
-        ax = fig.add_subplot(grid[0, k])
+        ax = fig.add_subplot(grid[0, k], facecolor="0.85")
         meshes.append(ax.pcolormesh(x, y, field[0], cmap="RdYlBu_r", vmin=vmin, vmax=vmax, shading="auto"))
         ax.set_title(title, fontsize=10)
         axes.append(ax)
@@ -213,6 +219,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--hours", type=int, default=None, help="only the first so many hours")
     parser.add_argument("--fps", type=int, default=8)
     parser.add_argument("--stations", action="store_true", help="add the observed station values")
+    parser.add_argument("--show-sea", action="store_true", help="draw the downscaled fields over the sea too")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
@@ -224,7 +231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         data = {k: v[: args.hours] if k in ("valid", "coarse", "spatial", "hourly") else v for k, v in data.items()}
     stations = observed(cfg, data["valid"]) if args.stations else None
     out = Path(args.out or run / (Path(name).stem + ".mp4"))
-    render(data, stations, out, args.fps)
+    render(data, stations, out, args.fps, sea=args.show_sea)
     print(f"{len(data['valid'])} frames written to {out}")
     return 0
 
