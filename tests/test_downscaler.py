@@ -189,3 +189,18 @@ def test_a_checkpoint_without_the_newer_fields_still_loads(tmp_path, static_fiel
     restored = dsc.Downscaler.load(tmp_path / "model.pt", device="cpu")
     assert restored.net.cfg.upsample == "transpose"
     assert restored.net.cfg.noise_fine_fraction == 0.5
+
+def test_multiscale_crps_penalises_members_that_differ_at_a_coarse_scale():
+    torch.manual_seed(0)
+    target = torch.randn(4, 64, 64)
+    fine_noise = torch.randn(4, 8, 64, 64)
+    blocky_noise = torch.nn.functional.interpolate(torch.randn(4, 8, 4, 4), size=(64, 64), mode="nearest")
+    pixelwise, blocky = target[:, None] + fine_noise, target[:, None] + blocky_noise
+    mask = torch.ones(64, 64, dtype=torch.bool)
+    mask[:, :8] = False
+
+    plain = dsc.fair_crps(pixelwise, target, mask), dsc.fair_crps(blocky, target, mask)
+    assert plain[0] == pytest.approx(plain[1].item(), rel=0.1)
+    multi = dsc.multiscale_fair_crps(pixelwise, target, mask), dsc.multiscale_fair_crps(blocky, target, mask)
+    assert multi[1] > 2 * multi[0]
+    assert dsc.multiscale_fair_crps(pixelwise, target, mask, factors=()) == pytest.approx(plain[0].item())

@@ -231,6 +231,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--spatial", required=True, help="checkpoint of the spatial model")
     parser.add_argument("--out", required=True)
     parser.add_argument("--from-scratch", action="store_true", help="do not start from the spatial weights")
+    parser.add_argument("--init-hourly", default=None, help="start from this hourly checkpoint, keeping its statistics")
+    parser.add_argument(
+        "--multiscale", type=int, nargs="*", default=None, metavar="FACTOR",
+        help="also score block averages of these sizes in pixels, e.g. 2 4 8 16, against noise at the wrong scale",
+    )
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--learning-rate", type=float, default=None)
@@ -281,11 +286,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         len(times), len(train[0]), len(val[0]),
     )
 
-    stats = {**spatial.stats, "tendency": tendency_stats(coarse, train[1], train[2], land)}
-    model_cfg = hr.HourlyConfig(**asdict(spatial.net.cfg))
-    net = hr.HourlyNet(model_cfg)
-    if not args.from_scratch:
-        hr.init_from_spatial(net, args.spatial)
+    if args.init_hourly:
+        start = hr.HourlyDownscaler.load(args.init_hourly, device)
+        stats, net, model_cfg = start.stats, start.net, start.net.cfg
+    else:
+        stats = {**spatial.stats, "tendency": tendency_stats(coarse, train[1], train[2], land)}
+        model_cfg = hr.HourlyConfig(**asdict(spatial.net.cfg))
+        net = hr.HourlyNet(model_cfg)
+        if not args.from_scratch:
+            hr.init_from_spatial(net, args.spatial)
     net = net.to(device)
     static_norm = spatial.static_norm
     validator = Validator(coarse, fine, times, *val, spatial, land, training.eval_members, device)
@@ -298,12 +307,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         optimiser, max_lr=training.learning_rate, total_steps=max(1, training.epochs * steps_per_epoch)
     )
     loss_fn = dsc.fair_crps if model_cfg.stochastic else dsc.mse
+    if args.multiscale and model_cfg.stochastic:
+        def loss_fn(pred, target, mask):
+            return dsc.multiscale_fair_crps(pred, target, mask, args.multiscale)
     members = training.members if model_cfg.stochastic else 1
     loss_mask = torch.from_numpy(land).to(device) if training.land_only else None
     logger.info(
         "model: %s loss, %.2fM parameters, %s, %d steps per epoch, device %s; tendency std %.2f K",
         training.loss, sum(p.numel() for p in net.parameters()) / 1e6,
-        "from scratch" if args.from_scratch else f"started from {args.spatial}", steps_per_epoch, device,
+        "from scratch" if args.from_scratch else f"started from {args.init_hourly or args.spatial}", steps_per_epoch, device,
         stats["tendency"]["std"],
     )
 
@@ -342,7 +354,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if best is None or score < best:
             best = score
             hr.HourlyDownscaler(net, stats, spatial.static, device).save(
-                out / "model.pt", extra={"epoch": epoch, "spatial": str(args.spatial)}
+                out / "model.pt", extra={"epoch": epoch, "spatial": str(args.spatial), "multiscale": args.multiscale or []}
             )
         (out / "history.json").write_text(json.dumps(history, indent=2))
 

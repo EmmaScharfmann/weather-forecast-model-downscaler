@@ -163,6 +163,18 @@ def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_p
     restored = hourly.HourlyDownscaler.load(out / "model.pt", device="cpu")
     assert restored.stats["tendency"]["std"] > 0
 
+    tuned = tmp_path / "tuned"
+    status = train_hourly.main([
+        "--pairs", str(pairs), "--spatial", str(tmp_path / "spatial.pt"), "--out", str(tuned),
+        "--init-hourly", str(out / "model.pt"), "--multiscale", "2", "4",
+        "--epochs", "1", "--max-steps-per-epoch", "2", "--batch-size", "4", "--eval-members", "2",
+        "--val-start", "2020-07-04", "--device", "cpu",
+    ])
+    assert status == 0
+    checkpoint = hourly.safe_load(tuned / "model.pt")
+    assert checkpoint["extra"]["multiscale"] == [2, 4]
+    assert checkpoint["stats"]["tendency"] == restored.stats["tendency"]
+
     import check_hourly_spectrum
 
     status = check_hourly_spectrum.main([
