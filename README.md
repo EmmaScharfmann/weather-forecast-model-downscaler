@@ -53,6 +53,7 @@ For hourly output between the 6-hourly steps:
 | Download hourly CERRA (analyses plus their +1 h/+2 h forecasts) | `scripts/download_cerra.py --hourly --start ... --end ... --crop-like EmmaScharfmann/cerra-france-t2m-2016-2020` |
 | Pair it with ERA5, here from Google's public copy | `scripts/build_pairs.py --coarse-source era5-arco` |
 | Train, starting from a spatial model | `scripts/train_hourly.py --spatial runs/crps/model.pt --out runs/hourly` |
+| Fine-tune it with CRPS on block averages too, against grain from the noise | `scripts/train_hourly.py --spatial runs/crps/model.pt --init-hourly runs/hourly/model.pt --multiscale 2 4 8 16 --out runs/hourly_ms` |
 | Fetch AIFS-ENS from ECMWF open data, no account needed | `scripts/fetch_forecasts.py --source open-data --start ... --end ...` |
 | Downscale every hour, with the spatial model as baseline | `scripts/downscale_hourly.py --hourly runs/hourly/model.pt --spatial runs/crps/model.pt` |
 | Score each against stations | `scripts/eval_downscaled.py --forecasts outputs/hourly/forecasts/*.zarr --downscaled outputs/hourly/hourly/*.zarr` |
