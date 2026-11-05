@@ -7,7 +7,7 @@ Usage::
 
 Over the validation hours, four ways of filling an hour are compared with the target:
 
-- ``line``: the coarse field interpolated in time;
+- ``line``: the coarse field interpolated linearly in time, shown as "coarse, linear in time";
 - ``spatial``: the spatial model on that line, one member, drawing new noise every hour;
 - ``hourly``: the hourly model, one member, keeping its noise from hour to hour;
 - ``hourly mean``: the mean of the hourly members.
@@ -45,6 +45,7 @@ from train_downscaler import open_pairs  # noqa: E402
 
 logger = logging.getLogger("hourly_spectrum")
 LABELS = ["target", "line", "spatial", "hourly", "hourly mean"]
+SHOWN = {"line": "coarse, linear in time", "spatial": "spatial, linear in time"}
 
 
 def longest_run(times: np.ndarray) -> slice:
@@ -104,10 +105,10 @@ def figure(spatial: pd.DataFrame, temporal: pd.DataFrame, path: Path) -> None:
         (temporal, "period_h", "period (hours)", "temporal"),
     ]):
         for name in LABELS:
-            ax[row, 0].loglog(frame[x], frame[name], color=colours[name], marker="o", ms=2, label=name)
+            ax[row, 0].loglog(frame[x], frame[name], color=colours[name], marker="o", ms=2, label=SHOWN.get(name, name))
             if name != "target":
                 ax[row, 1].semilogx(frame[x], frame[name] / frame["target"], color=colours[name], marker="o",
-                                    ms=2, label=name)
+                                    ms=2, label=SHOWN.get(name, name))
         ax[row, 0].set_title(f"{what} power spectrum over land")
         ax[row, 0].set_ylabel("power")
         ax[row, 1].axhline(1.0, color="k", lw=0.8, ls="--")

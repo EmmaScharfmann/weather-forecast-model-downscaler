@@ -43,6 +43,7 @@ from train_downscaler import Scores, crps_per_pixel, open_pairs, split_times  # 
 
 logger = logging.getLogger("train_hourly")
 METHODS = ("line", "spatial", "hourly")
+SHOWN = {"line": "coarse, linear in time", "spatial": "spatial, linear in time"}
 
 
 def tendency_stats(coarse: np.ndarray, starts: np.ndarray, ends: np.ndarray, land: np.ndarray) -> dict:
@@ -171,7 +172,7 @@ def figures(out: Path, report: dict, history: list[dict], series: dict) -> None:
         if name not in report:
             continue
         for axis, metric in zip(ax[:2], ("rmse", "crps")):
-            axis.plot(offsets, [report[name][f"land_+{k}h"][metric] for k in offsets], style, label=name)
+            axis.plot(offsets, [report[name][f"land_+{k}h"][metric] for k in offsets], style, label=SHOWN.get(name, name))
     for axis, metric in zip(ax[:2], ("RMSE", "CRPS")):
         axis.set_title(f"{metric} over land against CERRA (K)")
         axis.set_xlabel("hours after the coarse step")
@@ -182,7 +183,7 @@ def figures(out: Path, report: dict, history: list[dict], series: dict) -> None:
     ax[2].set_xlabel("epoch")
     t = pd.DatetimeIndex(series["times"])
     ax[3].plot(t, series["truth"] - 273.15, "k-", label="CERRA")
-    ax[3].plot(t, series["line"] - 273.15, "k--", label="line")
+    ax[3].plot(t, series["line"] - 273.15, "k--", label=SHOWN["line"])
     ax[3].plot(t, series["hourly"] - 273.15, "C3-", label="hourly, mean")
     ax[3].plot(t[series["steps"]], series["truth"][series["steps"]] - 273.15, "ko", ms=4)
     ax[3].set_title(f"one land point, {series['where']}")
