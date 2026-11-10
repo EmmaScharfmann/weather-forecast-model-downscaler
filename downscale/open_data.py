@@ -1,9 +1,11 @@
-"""AIFS-ENS forecasts from ECMWF's open data, readable without an account.
+"""ECMWF open-data forecasts, readable without an account: AIFS-ENS by default, or the other models of
+:data:`MODELS` (IFS ENS, IFS HRES and AIFS single).
 
 Every run since mid-2025 is mirrored on Google Cloud (``gs://ecmwf-open-data``, also on AWS as
-``s3://ecmwf-forecasts``, which often answers 503) as one GRIB2 file per lead time and kind
-(``cf`` for the control member, ``pf`` for the 50 perturbed ones), each with a JSON-lines index giving
-the byte range of every field. Only the 2 m temperature messages of the members asked for are read, and
+``s3://ecmwf-forecasts``, which often answers 503) as one GRIB2 file per lead time and kind, each with a
+JSON-lines index giving the byte range of every field. AIFS-ENS splits its members into ``cf`` (the
+control) and ``pf`` (the 50 perturbed ones), IFS ENS keeps all 51 in one ``ef`` file and the deterministic
+models have a single ``fc`` one. Only the 2 m temperature messages of the members asked for are read, and
 each is cropped to the region as soon as it is decoded, so one ~600 kB global message is read per field.
 """
 
@@ -25,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 OPEN_DATA_URL = "https://storage.googleapis.com/ecmwf-open-data"
 PARAMS = {"t2m": "2t"}
+#: Models in the bucket: their directory, stream and the kinds of file their members are split into.
+MODELS = {
+    "aifs-ens": ("aifs-ens", "enfo", ("cf", "pf")),
+    "ifs-ens": ("ifs", "enfo", ("ef",)),
+    "ifs": ("ifs", "oper", ("fc",)),
+    "aifs-single": ("aifs-single", "oper", ("fc",)),
+}
 
 
 def _get(url: str, byte_range: tuple[int, int] | None = None, retries: int = 6) -> bytes:
@@ -53,22 +62,25 @@ def _get(url: str, byte_range: tuple[int, int] | None = None, retries: int = 6) 
     raise AssertionError("unreachable")
 
 
-def file_url(init, lead_hours: int, kind: str, base: str = OPEN_DATA_URL) -> str:
+def file_url(init, lead_hours: int, kind: str, base: str = OPEN_DATA_URL, model: str = "aifs-ens") -> str:
     """URL of one GRIB2 file, without its extension.
 
     :param init: Initialisation time.
     :type init: str | pandas.Timestamp
     :param lead_hours: Lead time [h].
     :type lead_hours: int
-    :param kind: ``"cf"`` or ``"pf"``.
+    :param kind: One of the model's kinds of file, such as ``"cf"`` or ``"pf"``.
     :type kind: str
     :param base: Bucket URL.
     :type base: str
+    :param model: A key of :data:`MODELS`.
+    :type model: str
     :returns: The URL, to which ``.grib2`` or ``.index`` is appended.
     :rtype: str
     """
     t = pd.Timestamp(init)
-    return f"{base}/{t:%Y%m%d}/{t:%H}z/aifs-ens/0p25/enfo/{t:%Y%m%d%H}0000-{lead_hours}h-enfo-{kind}"
+    directory, stream, _ = MODELS[model]
+    return f"{base}/{t:%Y%m%d}/{t:%H}z/{directory}/0p25/{stream}/{t:%Y%m%d%H}0000-{lead_hours}h-{stream}-{kind}"
 
 
 def decode(message: bytes) -> tuple[int, np.ndarray, np.ndarray, np.ndarray]:
@@ -99,11 +111,12 @@ def decode(message: bytes) -> tuple[int, np.ndarray, np.ndarray, np.ndarray]:
 
 def fetch_open_data(
     init, region: Region, variable: str = "t2m", members: int | None = 10, max_lead_hours: int = 240,
-    step_hours: int = 6, base: str = OPEN_DATA_URL, get=_get,
+    step_hours: int = 6, base: str = OPEN_DATA_URL, get=_get, model: str = "aifs-ens",
 ) -> xr.DataArray:
     """Read one initialisation over a region, laid out as :func:`downscale.sources.fetch_forecast` does.
 
-    Member 0 is the control forecast and members 1 onwards the perturbed ones, in order of their number.
+    Member 0 is the control forecast and members 1 onwards the perturbed ones, in order of their number; a
+    deterministic model has member 0 only.
 
     :param init: Initialisation time.
     :type init: str | pandas.Timestamp
@@ -111,7 +124,7 @@ def fetch_open_data(
     :type region: tuple[float, float, float, float]
     :param variable: Short name, a key of :data:`PARAMS`.
     :type variable: str
-    :param members: Members to keep, control included; ``None`` keeps all 51.
+    :param members: Members to keep, control included; ``None`` keeps all of them.
     :type members: int | None
     :param max_lead_hours: Last lead time [h].
     :type max_lead_hours: int
@@ -121,27 +134,31 @@ def fetch_open_data(
     :type base: str
     :param get: Callable reading a URL and an optional byte range, replaceable for testing.
     :type get: typing.Callable
+    :param model: A key of :data:`MODELS`.
+    :type model: str
     :returns: Values over ``(time, lead_time, ensemble, lat, lon)`` in kelvin, longitudes in -180..180.
     :rtype: xarray.DataArray
     :raises KeyError: If a member's field is missing from a file.
     """
     param = PARAMS[variable]
-    perturbed = None if members is None else members - 1
+    if model not in MODELS:
+        raise ValueError(f"unknown open-data model {model!r}; expected one of {sorted(MODELS)}")
+    kinds = MODELS[model][2]
     leads = list(range(step_hours, max_lead_hours + 1, step_hours))
     crop = coords = None
     fields = []
     for lead in leads:
         by_number = {}
-        for kind in ("cf", "pf"):
-            if kind == "pf" and perturbed == 0:
+        for kind in kinds:
+            if kind == "pf" and members == 1:
                 continue
-            url = file_url(init, lead, kind, base)
+            url = file_url(init, lead, kind, base, model)
             index = [json.loads(line) for line in get(url + ".index").decode().splitlines() if line.strip()]
             records = sorted(
-                (r for r in index if r.get("param") == param), key=lambda r: int(r.get("number", 0))
+                (r for r in index if r.get("param") == param), key=lambda r: int(r.get("number") or 0)
             )
-            if kind == "pf" and perturbed is not None:
-                records = records[:perturbed]
+            if members is not None:
+                records = [r for r in records if int(r.get("number") or 0) < members]
             for record in records:
                 number, lat, lon, values = decode(get(url + ".grib2", (record["_offset"], record["_length"])))
                 if crop is None:
@@ -159,5 +176,5 @@ def fetch_open_data(
             "ensemble": np.arange(fields[0].shape[0]), "lat": coords[0], "lon": coords[1],
         },
         name=variable,
-        attrs={"units": "K", "source": "ECMWF open data, AIFS-ENS"},
+        attrs={"units": "K", "source": f"ECMWF open data, {model}"},
     )
