@@ -175,6 +175,30 @@ class ERA5:
         return self._fix_grid(da).load()
 
 
+def open_era5(source: str = "era5") -> ERA5:
+    """Open ERA5 from Earthmover, or from Google's public copy when Earthmover cannot be opened.
+
+    Earthmover stores ERA5 in spatial chunks, so a region is read on its own; Google's copy keeps
+    one global field per chunk, so every hour costs a global read (about a second each), but it
+    needs no account.
+
+    :param source: ``"era5"`` for Earthmover, falling back to Google; ``"era5-arco"`` for Google only.
+    :type source: str
+    :returns: The source, not loaded.
+    :rtype: ERA5
+    :raises ValueError: If the source is neither.
+    """
+    if source == "era5-arco":
+        return ERA5(dataset=open_arco_era5())
+    if source != "era5":
+        raise ValueError(f"coarse.source {source!r} is not supported; use 'era5' or 'era5-arco'")
+    try:
+        return ERA5()
+    except Exception as exc:  # noqa: BLE001  (no account, no token, or the service is down)
+        logger.warning("cannot open ERA5 on Earthmover (%r): reading Google's public copy instead", exc)
+        return ERA5(dataset=open_arco_era5())
+
+
 def _is_store(path: str, fs) -> bool:
     """Report whether a path is a Zarr store rather than a folder of stores.
 
