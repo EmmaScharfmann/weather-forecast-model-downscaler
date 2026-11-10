@@ -349,6 +349,90 @@ class HourlyDownscaler(Downscaler):
         return np.concatenate(out, 0)
 
 
+def hourly_forecast(forecast: xr.DataArray) -> xr.DataArray:
+    """The coarse forecast at every hour, from its first lead time to the hour before its last.
+
+    The last lead time has no window after it, so the hours stop just before it.
+
+    :param forecast: Forecast over ``(time, lead_time, ensemble, lat, lon)``.
+    :type forecast: xarray.DataArray
+    :returns: The interpolated forecast.
+    :rtype: xarray.DataArray
+    """
+    return hourly_leads(forecast).isel(lead_time=slice(None, -1))
+
+
+def downscale_hours(
+    model: HourlyDownscaler, forecast: xr.DataArray, leads: np.ndarray, samples: int, batch: int, seed: int = 0
+) -> xr.Dataset:
+    """Run the hourly model over every member of a 6-hourly forecast.
+
+    :param model: Hourly model.
+    :type model: downscale.hourly.HourlyDownscaler
+    :param forecast: 6-hourly forecast over ``(time, lead_time, ensemble, lat, lon)`` in kelvin.
+    :type forecast: xarray.DataArray
+    :param leads: Hourly lead times to produce.
+    :type leads: numpy.ndarray
+    :param samples: Fine maps per coarse member.
+    :type samples: int
+    :param batch: Hours processed at once.
+    :type batch: int
+    :param seed: Seed of the noise; member ``m`` uses ``seed + m`` at every hour.
+    :type seed: int
+    :returns: ``t2m_interp`` and ``t2m_ds`` laid out as :func:`downscale.inference.downscale_forecast` does.
+    :rtype: xarray.Dataset
+    :raises ValueError: If a lead time's window does not start on a forecast step.
+    """
+    from .inference import to_fine_grid
+
+    coarse = to_fine_grid(forecast, model.lat, model.lon).astype("f4")
+    steps = forecast["lead_time"].values
+    init = forecast["time"].values
+    n_init, _, n_ensemble = coarse.shape[:3]
+    n_samples = samples if model.net.cfg.stochastic else 1
+    valid = init[:, None] + leads[None, :]
+    offsets = offsets_of(valid[0])
+    if not all(offsets_of(v).tolist() == offsets.tolist() for v in valid):
+        raise ValueError("initialisations at different hours of the 6-hour cycle")
+    start_leads = leads - offsets.astype("timedelta64[h]").astype(leads.dtype)
+    position = {lead: i for i, lead in enumerate(steps.tolist())}
+    missing = [s for s in start_leads.tolist() if s not in position]
+    if missing:
+        raise ValueError(f"windows start between forecast steps, e.g. at lead {missing[0]}")
+    window = np.timedelta64(WINDOW_HOURS, "h").astype(leads.dtype)
+    starts = np.array([position[s] for s in start_leads.tolist()])
+    ends = np.array([position[s] for s in (start_leads + window).tolist()])
+
+    line = np.empty((n_init, len(leads), n_ensemble, *model.lat.shape), "f4")
+    fine = np.empty((n_init, len(leads), n_ensemble, n_samples, *model.lat.shape), "f4")
+    for i in range(n_init):
+        for member in range(n_ensemble):
+            c0, c1 = coarse[i, starts, member], coarse[i, ends, member]
+            line[i, :, member] = temporal_interpolation(c0, c1, offsets)
+            fine[i, :, member] = model.predict_hours(
+                c0, c1, offsets, valid[i], members=samples, batch=batch, seed=seed + member
+            )
+    import xarray as xr
+
+    return xr.Dataset(
+        {
+            "t2m_interp": (("time", "lead_time", "ensemble", "y", "x"), line, {"units": "K"}),
+            "t2m_ds": (("time", "lead_time", "ensemble", "sample", "y", "x"), fine, {"units": "K"}),
+            "land_sea_mask": (("y", "x"), model.static["land_sea_mask"].astype("f4")),
+            "orography": (("y", "x"), model.static["cerra_orography"].astype("f4"), {"units": "m"}),
+        },
+        coords={
+            "time": init,
+            "lead_time": leads,
+            "ensemble": forecast["ensemble"].values,
+            "sample": np.arange(n_samples),
+            "lat": (("y", "x"), model.lat),
+            "lon": (("y", "x"), model.lon),
+            "valid_time": (("time", "lead_time"), valid),
+        },
+    )
+
+
 def config_dict(cfg: HourlyConfig) -> dict:
     """The settings of an hourly model as a plain dict, for reports.
 

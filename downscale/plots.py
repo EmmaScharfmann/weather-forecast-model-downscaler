@@ -191,7 +191,7 @@ def map_grid(
 
 def lead_figure(
     tables: dict[str, pd.DataFrame], metrics: Sequence[str] = ("rmse_K", "crps_K"),
-    references: Sequence[str] = (), title: str | None = None,
+    references: Sequence[str] = (), title: str | None = None, colours: dict[str, str] | None = None,
 ):
     """Plot scores against lead time.
 
@@ -204,9 +204,12 @@ def lead_figure(
     :type references: collections.abc.Sequence[str]
     :param title: Figure title.
     :type title: str | None
+    :param colours: Line colour per name, for names :data:`COLOURS` does not know.
+    :type colours: dict[str, str] | None
     :returns: The figure.
     :rtype: matplotlib.figure.Figure
     """
+    colours = {**COLOURS, **(colours or {})}
     names = {"rmse_K": "RMSE of the ensemble mean (K)", "crps_K": "fair CRPS (K)", "bias_K": "bias (K)",
              "spread_skill": "spread / RMSE", "spread_K": "ensemble spread (K)"}
     fig, axes = plt.subplots(1, len(metrics), figsize=(6 * len(metrics), 4.2), layout="constrained", squeeze=False)
@@ -215,7 +218,7 @@ def lead_figure(
             reference = name in references
             if reference and metric not in ("rmse_K", "bias_K"):
                 continue
-            axis.plot(table.lead_hours / 24, table[metric], marker="o", ms=3, color=COLOURS.get(name, "tab:green"),
+            axis.plot(table.lead_hours / 24, table[metric], marker="o", ms=3, color=colours.get(name, "tab:green"),
                       ls="--" if reference else "-", label=name)
         if metric in ("bias_K",):
             axis.axhline(0, color="k", lw=0.8)
