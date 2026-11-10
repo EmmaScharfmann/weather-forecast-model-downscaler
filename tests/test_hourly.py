@@ -135,7 +135,7 @@ def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_p
     import xarray as xr
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-    import train_hourly
+    import train_downscaler
     from conftest import diurnal
 
     spatial = spatial_model(static_fields, stats, loss="crps")
@@ -150,8 +150,8 @@ def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_p
         coords={"time": times.astype("datetime64[ns]")},
     ).to_zarr(pairs / "pairs.zarr")
     out = tmp_path / "run"
-    status = train_hourly.main([
-        "--pairs", str(pairs), "--spatial", str(tmp_path / "spatial.pt"), "--out", str(out),
+    status = train_downscaler.main([
+        "--temporal", "--pairs", str(pairs), "--spatial", str(tmp_path / "spatial.pt"), "--out", str(out),
         "--epochs", "1", "--max-steps-per-epoch", "2", "--batch-size", "4", "--eval-members", "2",
         "--val-start", "2020-07-04", "--device", "cpu",
     ])
@@ -164,8 +164,8 @@ def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_p
     assert restored.stats["tendency"]["std"] > 0
 
     tuned = tmp_path / "tuned"
-    status = train_hourly.main([
-        "--pairs", str(pairs), "--spatial", str(tmp_path / "spatial.pt"), "--out", str(tuned),
+    status = train_downscaler.main([
+        "--temporal", "--pairs", str(pairs), "--spatial", str(tmp_path / "spatial.pt"), "--out", str(tuned),
         "--init-hourly", str(out / "model.pt"), "--multiscale", "2", "4",
         "--epochs", "1", "--max-steps-per-epoch", "2", "--batch-size", "4", "--eval-members", "2",
         "--val-start", "2020-07-04", "--device", "cpu",
@@ -175,10 +175,10 @@ def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_p
     assert checkpoint["extra"]["multiscale"] == [2, 4]
     assert checkpoint["stats"]["tendency"] == restored.stats["tendency"]
 
-    import check_hourly_spectrum
+    import check_spectrum
 
-    status = check_hourly_spectrum.main([
-        "--pairs", str(pairs), "--hourly", str(out / "model.pt"), "--spatial", str(tmp_path / "spatial.pt"),
+    status = check_spectrum.main([
+        "--pairs", str(pairs), "--hourly", str(out / "model.pt"), "--model", str(tmp_path / "spatial.pt"),
         "--val-start", "2020-07-04", "--members", "2", "--device", "cpu",
     ])
     assert status == 0
@@ -188,11 +188,7 @@ def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_p
 
 
 def test_temporal_spectrum_sees_noise_redrawn_every_hour():
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-    from check_hourly_spectrum import longest_run, temporal_spectrum
+    from downscale.diagnostics import longest_run, temporal_spectrum
 
     hours = np.arange(96, dtype=float)[:, None, None]
     smooth = np.sin(2 * np.pi * hours / 24) * np.ones((1, 4, 4))
