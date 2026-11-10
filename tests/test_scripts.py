@@ -289,6 +289,16 @@ def test_downscaling_produces_an_ensemble_on_the_fine_grid(
     assert np.abs(result.t2m_interp.isel(time=0, lead_time=0, ensemble=0).values - expected).mean() < 0.5
     assert (Path(config.paths.downscaled) / "map_check.png").exists()
 
+    import movie_hourly
+
+    movie = Path(config.paths.downscaled) / "spatial.gif"
+    status = movie_hourly.main([
+        "--config", str(config_path), "--forecast", str(forecast_store / "forecast_2023-08-05.zarr"),
+        "--downscaled", str(Path(config.paths.downscaled) / "forecast_2023-08-05.zarr"), "--hours", "2",
+        "--out", str(movie),
+    ])
+    assert status == 0 and movie.stat().st_size > 0
+
 
 def test_fetched_aifs_ens_forecasts_can_be_downscaled(config, config_path, trained_model, static_fields, tmp_path):
     from test_sources import earthmover_archive

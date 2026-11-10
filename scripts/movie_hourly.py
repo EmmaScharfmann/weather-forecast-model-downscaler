@@ -1,14 +1,18 @@
-"""Animate an hourly downscaled forecast over the region.
+"""Animate a downscaled forecast over the region, hourly or at the forecast's own steps.
 
 Usage::
 
     python scripts/movie_hourly.py --run outputs/hourly --name aifs-ens_20250810T0000.zarr \\
         --out outputs/hourly/movie.mp4 --stations
+    python scripts/movie_hourly.py --forecast outputs/forecasts/aifs-ens_20250810T0000.zarr \\
+        --downscaled outputs/downscaled/aifs-ens_20250810T0000.zarr --stations
 
-Reads the three stores ``downscale_hourly.py`` wrote for one forecast and draws, at every hour, the
-coarse forecast, the spatial model on the coarse forecast interpolated in time, and the hourly model,
-for one member and sample. ``--stations`` adds a panel of the observed station values. Under the maps
-a strip follows one point through the whole forecast.
+With ``--run``, reads the three stores ``downscale_hourly.py`` wrote for one forecast and draws, at every
+hour, the coarse forecast, the spatial model on the coarse forecast interpolated in time, and the hourly
+model. With ``--forecast`` and ``--downscaled``, it draws the coarse forecast and the spatial model alone,
+from ``fetch_forecasts.py`` and ``downscale_forecasts.py``, one frame per lead time. Either way one member
+and sample are shown. ``--stations`` adds a panel of the observed station values. Under the maps a strip
+follows one point through the whole forecast.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ from downscale.config import load_config  # noqa: E402
 
 logger = logging.getLogger("movie")
 PARIS = (48.85, 2.35)
+COLOURS = {"spatial": "tab:blue", "hourly": "tab:red"}
 
 
 def nearest(lat: np.ndarray, lon: np.ndarray, point: tuple[float, float]) -> tuple[int, int]:
@@ -50,38 +55,54 @@ def nearest(lat: np.ndarray, lon: np.ndarray, point: tuple[float, float]) -> tup
     return np.unravel_index(int(np.argmin(distance)), lat.shape)
 
 
-def frames(run: Path, name: str, variable: str, member: int, sample: int) -> dict:
+def frames(coarse_path: Path, models: dict[str, Path], variable: str, member: int, sample: int) -> dict:
     """Load the fields of one forecast, in degrees Celsius.
 
-    :param run: Output directory of ``downscale_hourly.py``.
-    :type run: pathlib.Path
-    :param name: Store name.
-    :type name: str
+    :param coarse_path: The coarse forecast store.
+    :type coarse_path: pathlib.Path
+    :param models: Downscaled stores by name, ``"spatial"`` and possibly ``"hourly"``, on the same lead times.
+    :type models: dict[str, pathlib.Path]
     :param variable: Variable of the coarse store.
     :type variable: str
     :param member: Ensemble member.
     :type member: int
     :param sample: Sample of that member.
     :type sample: int
-    :returns: ``init``, ``valid``, ``coarse`` with its ``coarse_lat`` and ``coarse_lon``, ``spatial``, ``hourly``,
-        ``lat``, ``lon`` and ``land``.
+    :returns: ``init``, ``valid``, ``coarse`` with its ``coarse_lat`` and ``coarse_lon``, ``fields`` (the models by
+        name), ``lat``, ``lon`` and ``land``.
     :rtype: dict
     """
-    coarse = xr.open_zarr(run / "forecasts" / name)[variable].isel(time=0, ensemble=member)
-    spatial = xr.open_zarr(run / "spatial" / name)
-    hourly = xr.open_zarr(run / "hourly" / name)
+    stores = {name: xr.open_zarr(path) for name, path in models.items()}
+    first = next(iter(stores.values()))
+    coarse = xr.open_zarr(coarse_path)[variable].isel(time=0, ensemble=member).sel(lead_time=first["lead_time"])
     pick = dict(time=0, ensemble=member, sample=sample)
+    init = pd.Timestamp(first["time"].values[0])
     return {
-        "init": pd.Timestamp(hourly["time"].values[0]),
-        "valid": pd.DatetimeIndex(hourly["valid_time"].isel(time=0).values),
+        "init": init,
+        "valid": init + pd.TimedeltaIndex(first["lead_time"].values),
         "coarse": coarse.values - 273.15,
         "coarse_lat": coarse["lat"].values,
         "coarse_lon": coarse["lon"].values,
-        "spatial": spatial["t2m_ds"].isel(pick).values - 273.15,
-        "hourly": hourly["t2m_ds"].isel(pick).values - 273.15,
-        "lat": hourly["lat"].values,
-        "lon": hourly["lon"].values,
-        "land": hourly["land_sea_mask"].values > 0.5,
+        "fields": {name: ds["t2m_ds"].isel(pick).values - 273.15 for name, ds in stores.items()},
+        "lat": first["lat"].values,
+        "lon": first["lon"].values,
+        "land": first["land_sea_mask"].values > 0.5,
+    }
+
+
+def first_hours(data: dict, hours: int) -> dict:
+    """Keep the first frames of a forecast.
+
+    :param data: Fields from :func:`frames`.
+    :type data: dict
+    :param hours: Frames to keep.
+    :type hours: int
+    :returns: The same fields, shortened.
+    :rtype: dict
+    """
+    return {
+        **data, "valid": data["valid"][:hours], "coarse": data["coarse"][:hours],
+        "fields": {name: field[:hours] for name, field in data["fields"].items()},
     }
 
 
@@ -149,17 +170,18 @@ def render(data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=P
     :returns: The output file.
     :rtype: pathlib.Path
     """
-    valid, lat, lon, land = data["valid"], data["lat"], data["lon"], data["land"]
-    vmin, vmax = np.percentile(data["hourly"][:, land], [1, 99.5])
+    valid, lat, lon, land, fields = data["valid"], data["lat"], data["lon"], data["land"], data["fields"]
+    hourly = "hourly" in fields
+    vmin, vmax = np.percentile(fields["hourly" if hourly else "spatial"][:, land], [1, 99.5])
     # The loss only covers land, so the downscaled fields mean nothing over the sea; hide it everywhere alike.
     def shown(field: np.ndarray, mask: np.ndarray = land) -> np.ndarray:
         return np.where(mask, field, np.nan)
 
     coarse_mask = coarse_land(data["coarse_lat"], data["coarse_lon"], lat, lon, land)
+    in_time = ", linear in time" if hourly else ""
     panels = [
-        ("AIFS-ENS 0.25°, linear in time", data["coarse_lon"], data["coarse_lat"], shown(data["coarse"], coarse_mask)),
-        ("spatial model, linear in time", lon, lat, shown(data["spatial"])),
-        ("hourly model", lon, lat, shown(data["hourly"])),
+        (f"coarse forecast 0.25°{in_time}", data["coarse_lon"], data["coarse_lat"], shown(data["coarse"], coarse_mask)),
+        *((f"{name} model{in_time if name == 'spatial' else ''}", lon, lat, shown(field)) for name, field in fields.items()),
     ]
     n_maps = len(panels) + (stations is not None)
     fig = plt.figure(figsize=(4.6 * n_maps, 6.6))
@@ -195,9 +217,9 @@ def render(data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=P
     for ax in axes:
         ax.plot(lon[y, x], lat[y, x], "k+", ms=8)
     strip = fig.add_subplot(grid[1, :])
-    strip.plot(valid, data["coarse"][:, cy, cx], color="0.5", label="AIFS-ENS, linear in time")
-    strip.plot(valid, data["spatial"][:, y, x], color="tab:blue", label="spatial model")
-    strip.plot(valid, data["hourly"][:, y, x], color="tab:red", label="hourly model")
+    strip.plot(valid, data["coarse"][:, cy, cx], color="0.5", label=f"coarse forecast{in_time}")
+    for name, field in fields.items():
+        strip.plot(valid, field[:, y, x], color=COLOURS[name], label=f"{name} model")
     if stations is not None:
         distance = (stations["latitude"] - point[0]) ** 2 + (stations["longitude"] - point[1]) ** 2
         station = stations.isel(station=int(np.argmin(distance.values)))
@@ -238,8 +260,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=None)
     parser.add_argument("--run", default="outputs/hourly", help="output directory of downscale_hourly.py")
-    parser.add_argument("--name", default=None, help="store to animate; the first one if not given")
-    parser.add_argument("--out", default=None, help="mp4 or gif; <run>/<name>.mp4 if not given")
+    parser.add_argument("--name", default=None, help="store to animate in --run; the first one if not given")
+    parser.add_argument("--forecast", default=None, help="a coarse forecast store, for the spatial model alone")
+    parser.add_argument("--downscaled", default=None, help="its downscaled store from downscale_forecasts.py")
+    parser.add_argument("--out", default=None, help="mp4 or gif; next to the downscaled store if not given")
     parser.add_argument("--member", type=int, default=0)
     parser.add_argument("--sample", type=int, default=0)
     parser.add_argument("--hours", type=int, default=None, help="only the first so many hours")
@@ -249,13 +273,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     cfg = load_config(args.config)
-    run = Path(args.run)
-    name = args.name or sorted(p.name for p in (run / "hourly").glob("*.zarr"))[0]
-    data = frames(run, name, cfg.coarse.variable, args.member, args.sample)
+    if bool(args.forecast) != bool(args.downscaled):
+        parser.error("--forecast and --downscaled go together")
+    if args.forecast:
+        coarse, models = Path(args.forecast), {"spatial": Path(args.downscaled)}
+        default_out = models["spatial"].with_suffix(".mp4")
+    else:
+        run = Path(args.run)
+        name = args.name or sorted(p.name for p in (run / "hourly").glob("*.zarr"))[0]
+        coarse, models = run / "forecasts" / name, {"spatial": run / "spatial" / name, "hourly": run / "hourly" / name}
+        default_out = run / (Path(name).stem + ".mp4")
+    data = frames(coarse, models, cfg.coarse.variable, args.member, args.sample)
     if args.hours:
-        data = {k: v[: args.hours] if k in ("valid", "coarse", "spatial", "hourly") else v for k, v in data.items()}
+        data = first_hours(data, args.hours)
     stations = observed(cfg, data["valid"]) if args.stations else None
-    out = Path(args.out or run / (Path(name).stem + ".mp4"))
+    out = Path(args.out or default_out)
     render(data, stations, out, args.fps)
     print(f"{len(data['valid'])} frames written to {out}")
     return 0
