@@ -5,16 +5,18 @@ Requires a Copernicus Climate Data Store account, credentials in
 
 Usage::
 
-    python scripts/download_cerra.py --config config.yaml
-    python scripts/download_cerra.py --config config.yaml --consolidate
-    python scripts/download_cerra.py --hourly --start 2020-07-01 --end 2020-08-31 --out data/cerra_hourly
+    python scripts/download_cerra.py --config config_spatial.yaml
+    python scripts/download_cerra.py --config config_spatial.yaml --consolidate
+    python scripts/download_cerra.py --config config_temporal.yaml
 
 One request is issued per month and each month is written to its own store, so
 rerunning the command resumes an interrupted download.
 
-``--hourly`` fetches every hour instead of ``target.times``: CERRA analyses exist
-every three hours, so the two hours after each come from its +1 h and +2 h forecasts.
-``--start`` and ``--end`` restrict the download to a range of days.
+``target.hourly`` (set in ``config_temporal.yaml``, or ``--hourly``) fetches every hour
+instead of ``target.times``: CERRA analyses exist at ``temporal.analysis_times``, every
+three hours, so the hours after each come from its ``temporal.forecast_leads`` forecasts.
+``target.periods`` restricts the download to ranges of days; ``--start`` and ``--end``
+replace it with a single range.
 """
 
 from __future__ import annotations
@@ -38,9 +40,6 @@ from downscale.constants import G, T2M_RANGE_K
 
 logger = logging.getLogger("cerra")
 
-#: Times of the three-hourly analyses, and the forecast lead times that fill the hours between them.
-ANALYSIS_TIMES = [f"{h:02d}:00" for h in range(0, 24, 3)]
-FORECAST_LEADS = ["1", "2"]
 HOURLY_TIMES = [f"{h:02d}:00" for h in range(24)]
 
 
@@ -234,25 +233,49 @@ def expected_times(
     return pd.DatetimeIndex([d + pd.Timedelta(t + ":00") for d in dates for t in times])
 
 
-def month_days(year: int, month: int, start: str | None, end: str | None) -> list[int] | None:
-    """The days of a month that fall inside a date range.
+def month_days(year: int, month: int, periods: Sequence[Sequence[str]] | None) -> list[int] | None:
+    """The days of a month that fall inside any of some date ranges.
 
     :param year: Calendar year.
     :type year: int
     :param month: Calendar month.
     :type month: int
-    :param start: First day, ``None`` for no lower bound.
-    :type start: str | None
-    :param end: Last day, ``None`` for no upper bound.
-    :type end: str | None
-    :returns: The days, or ``None`` when the whole month is inside the range.
+    :param periods: ``[start, end]`` day ranges, either end ``None`` for no bound; ``None`` for no ranges.
+    :type periods: collections.abc.Sequence[collections.abc.Sequence[str]] | None
+    :returns: The days, or ``None`` when the whole month is inside the ranges.
     :rtype: list[int] | None
     """
     n_days = calendar.monthrange(year, month)[1]
-    first = pd.Timestamp(start).normalize() if start else pd.Timestamp.min
-    last = pd.Timestamp(end).normalize() if end else pd.Timestamp.max
-    days = [d for d in range(1, n_days + 1) if first <= pd.Timestamp(year, month, d) <= last]
+    if not periods:
+        return None
+    bounds = [
+        (pd.Timestamp(start).normalize() if start else pd.Timestamp.min,
+         pd.Timestamp(end).normalize() if end else pd.Timestamp.max)
+        for start, end in periods
+    ]
+    days = [d for d in range(1, n_days + 1) if any(a <= pd.Timestamp(year, month, d) <= b for a, b in bounds)]
     return None if len(days) == n_days else days
+
+
+def months_of(years: Sequence[int], periods: Sequence[Sequence[str]] | None) -> list[tuple[int, int]]:
+    """The months to download: every month of ``years``, or those touched by ``periods``.
+
+    :param years: First and last year, inclusive.
+    :type years: collections.abc.Sequence[int]
+    :param periods: ``[start, end]`` day ranges, or ``None``.
+    :type periods: collections.abc.Sequence[collections.abc.Sequence[str]] | None
+    :returns: ``(year, month)`` pairs in order.
+    :rtype: list[tuple[int, int]]
+    """
+    first, last = int(years[0]), int(years[1])
+    if not periods:
+        return [(y, m) for y in range(first, last + 1) for m in range(1, 13)]
+    months = set()
+    for start, end in periods:
+        start = pd.Timestamp(start or f"{first}-01-01")
+        end = pd.Timestamp(end or f"{last}-12-31")
+        months |= {(d.year, d.month) for d in pd.date_range(start.replace(day=1), end, freq="MS")}
+    return sorted(months)
 
 
 def check_month(
@@ -411,8 +434,8 @@ def do_month(
     :type client: typing.Any
     :param opener: Callable opening a GRIB file, replaceable for testing.
     :type opener: typing.Callable
-    :param hourly: Fetch every hour, from the analyses and their +1 h and +2 h forecasts,
-        instead of ``target.times``.
+    :param hourly: Fetch every hour, from the analyses and the forecasts after them
+        (``temporal.analysis_times`` and ``temporal.forecast_leads``), instead of ``target.times``.
     :type hourly: bool
     :param days: Days of the month to fetch; ``None`` fetches all of them.
     :type days: collections.abc.Sequence[int] | None
@@ -427,9 +450,11 @@ def do_month(
     variable = [cfg.target.variable]
     if hourly:
         requests = {
-            out / "grib" / f"t2m_{tag}_an.grib": build_request(variable, year, month, ANALYSIS_TIMES, days),
+            out / "grib" / f"t2m_{tag}_an.grib": build_request(
+                variable, year, month, cfg.temporal.analysis_times, days
+            ),
             out / "grib" / f"t2m_{tag}_fc.grib": build_request(
-                variable, year, month, ANALYSIS_TIMES, days, leadtimes=FORECAST_LEADS
+                variable, year, month, cfg.temporal.analysis_times, days, leadtimes=cfg.temporal.forecast_leads
             ),
         }
     else:
@@ -555,13 +580,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--keep-grib", action="store_true")
     parser.add_argument("--consolidate", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="print the requests and exit")
-    parser.add_argument("--hourly", action="store_true", help="fetch every hour instead of target.times")
-    parser.add_argument("--start", default=None, help="first day, overriding target.years")
-    parser.add_argument("--end", default=None, help="last day, overriding target.years")
+    parser.add_argument("--hourly", action="store_true", default=None, help="overrides target.hourly")
+    parser.add_argument("--start", default=None, help="first day, overriding target.periods and target.years")
+    parser.add_argument("--end", default=None, help="last day, overriding target.periods and target.years")
     parser.add_argument(
         "--crop-like", default=None, metavar="DATASET",
-        help="take the crop from a published dataset's manifest, e.g. EmmaScharfmann/cerra-france-t2m-2016-2020, "
-        "so the grid matches models trained on it",
+        help="overrides target.crop_like: take the crop from a published dataset's manifest, "
+        "e.g. EmmaScharfmann/cerra-france-t2m-2016-2020, so the grid matches models trained on it",
     )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
@@ -569,27 +594,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     cfg = load_config(args.config)
     out = Path(args.out or cfg.paths.target)
     out.mkdir(parents=True, exist_ok=True)
-    if args.crop_like:
-        adopt_crop(out, args.crop_like)
+    hourly = cfg.target.hourly if args.hourly is None else args.hourly
+    crop_like = args.crop_like or cfg.target.crop_like
+    if crop_like:
+        adopt_crop(out, crop_like)
     workers = args.workers or cfg.target.cds_workers
-    first, last = int(cfg.target.years[0]), int(cfg.target.years[1])
-    months = [(y, m) for y in range(first, last + 1) for m in range(1, 13)]
-    if args.start or args.end:
-        start = pd.Timestamp(args.start or f"{first}-01-01")
-        end = pd.Timestamp(args.end or f"{last}-12-31")
-        months = [(d.year, d.month) for d in pd.date_range(start.replace(day=1), end, freq="MS")]
-    days = {(y, m): month_days(y, m, args.start, args.end) for y, m in months}
+    first = int(cfg.target.years[0])
+    periods = [[args.start, args.end]] if args.start or args.end else cfg.target.periods
+    months = months_of(cfg.target.years, periods)
+    days = {(y, m): month_days(y, m, periods) for y, m in months}
 
     if args.consolidate:
         consolidate(cfg, out, months)
         return 0
     if args.dry_run:
-        times = ANALYSIS_TIMES if args.hourly else cfg.target.times
+        times = cfg.temporal.analysis_times if hourly else cfg.target.times
         print(json.dumps(build_request(cfg.target.static_variables, first, 1, ["00:00"], days=[1]), indent=1))
         print(json.dumps(build_request([cfg.target.variable], *months[0], times, days[months[0]]), indent=1))
-        if args.hourly:
+        if hourly:
             print(json.dumps(build_request(
-                [cfg.target.variable], *months[0], times, days[months[0]], leadtimes=FORECAST_LEADS
+                [cfg.target.variable], *months[0], times, days[months[0]], leadtimes=cfg.temporal.forecast_leads
             ), indent=1))
         print(f"... {len(months)} month(s) in total")
         return 0
@@ -598,7 +622,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     failed: dict[str, list[str]] = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
-            pool.submit(do_month, cfg, out, y, m, args.keep_grib, hourly=args.hourly, days=days[(y, m)]): (y, m)
+            pool.submit(do_month, cfg, out, y, m, args.keep_grib, hourly=hourly, days=days[(y, m)]): (y, m)
             for y, m in months
         }
         for n, future in enumerate(as_completed(futures), 1):

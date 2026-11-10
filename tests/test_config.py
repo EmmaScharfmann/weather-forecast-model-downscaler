@@ -57,8 +57,25 @@ def test_unknown_region_name_raises(config_file):
         load_config(config_file, region={"name": "atlantis", "box": None}).region_box
 
 
-def test_shipped_config_parses():
-    cfg = load_config("config.yaml")
-    assert isinstance(cfg, Config)
-    assert cfg.training.loss in ("crps", "mse")
+def test_shipped_configs_parse_and_the_temporal_one_changes_only_what_it_lists():
+    spatial, temporal = load_config("config_spatial.yaml"), load_config("config_temporal.yaml")
+    assert isinstance(spatial, Config) and spatial.training.loss in ("crps", "mse")
+    listed = yaml.safe_load(open("config_temporal.yaml"))
+    assert listed.pop("extends") == "config_spatial.yaml"
+    for section in ("region", "paths", "target", "coarse", "training", "stations", "evaluation"):
+        for key, value in vars(getattr(spatial, section)).items():
+            expected = listed.get(section, {}).get(key, value)
+            assert getattr(getattr(temporal, section), key) == expected, f"{section}.{key}"
+    assert temporal.target.hourly and not spatial.target.hourly
+
+
+def test_a_file_extends_another_relative_to_itself_and_cycles_are_refused(tmp_path):
+    (tmp_path / "base").mkdir()
+    (tmp_path / "base" / "a.yaml").write_text(yaml.safe_dump({"training": {"epochs": 3, "loss": "mse"}}))
+    (tmp_path / "b.yaml").write_text(yaml.safe_dump({"extends": "base/a.yaml", "training": {"epochs": 5}}))
+    cfg = load_config(tmp_path / "b.yaml", training={"members": 2})
+    assert (cfg.training.epochs, cfg.training.loss, cfg.training.members) == (5, "mse", 2)
+    (tmp_path / "base" / "a.yaml").write_text(yaml.safe_dump({"extends": "../b.yaml"}))
+    with pytest.raises(ValueError, match="cycle"):
+        load_config(tmp_path / "b.yaml")
     assert len(cfg.target.times) == 4

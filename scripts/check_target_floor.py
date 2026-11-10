@@ -2,7 +2,7 @@
 
 Usage::
 
-    python scripts/check_target_floor.py --config config.yaml --model runs/crps/model.pt \
+    python scripts/check_target_floor.py --config config_spatial.yaml --model runs/crps/model.pt \
         --start 2020-07-01 --end 2020-08-31
 
 Four fields are read at the same stations over the same period: the coarse

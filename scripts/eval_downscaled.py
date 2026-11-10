@@ -2,7 +2,7 @@
 
 Usage::
 
-    python scripts/eval_downscaled.py --config config.yaml
+    python scripts/eval_downscaled.py --config config_spatial.yaml
 
 Three series are read at every station and forecast hour: the raw coarse
 ensemble, the downscaled ensemble, and the raw field after interpolation onto

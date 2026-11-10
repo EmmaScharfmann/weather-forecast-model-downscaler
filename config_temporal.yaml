@@ -1,0 +1,56 @@
+# Configuration for the temporal (hourly) downscaler.
+#
+# It takes everything from config_spatial.yaml and lists only what the hourly model changes, so the
+# two files show what is shared and what is specific. Scripts read it with --config config_temporal.yaml
+# and, as before, command-line flags override the values set here.
+#
+# The published hourly model was trained in two stages, both with this file:
+#
+#   1. from the spatial model, plain CRPS, with the schedule below; the best epoch (8, val CRPS 0.622 K)
+#      is kept, and the run was stopped at epoch 22 once it had clearly started to overfit:
+#        train_downscaler.py --config config_temporal.yaml --temporal --out runs/hourly
+#   2. continued with CRPS on block averages too, 6 epochs at 3e-4:
+#        train_downscaler.py --config config_temporal.yaml --temporal --init-hourly runs/hourly/model.pt \
+#            --multiscale 2 4 8 16 --epochs 6 --learning-rate 3e-4 --out runs/hourly_ms
+
+extends: config_spatial.yaml
+
+paths:
+  target: data/cerra_hourly     # hourly CERRA from download_cerra.py
+  pairs: data/pairs_hourly      # hourly coarse/fine pairs from build_pairs.py
+  downscaled: outputs/hourly    # written by downscale_hourly.py
+
+target:
+  # Every hour: CERRA's three-hourly analyses plus the +1 h and +2 h forecasts after each.
+  hourly: true
+  # 2019 to train on, and a fortnight of summer 2020 holding the validation days. Hourly CERRA is
+  # three requests' worth per day, so a few periods are fetched instead of whole years.
+  periods:
+    - ["2019-01-01", "2019-12-31"]
+    - ["2020-07-22", "2020-08-04"]
+  # Use the published 6-hourly dataset's crop, so the grid matches the spatial model trained on it.
+  crop_like: EmmaScharfmann/cerra-france-t2m-2016-2020
+
+coarse:
+  # Google's public copy of ERA5, hourly and readable without an account.
+  source: era5-arco
+
+forecasts:
+  # ECMWF open data: every AIFS-ENS run since mid-2025, no account needed.
+  source: open-data
+
+training:
+  # One-cycle schedule over this many epochs; the best epoch is saved, so the run can be stopped early.
+  epochs: 100
+
+temporal:
+  # The spatial model the hourly one starts from, and the baseline it is scored against.
+  spatial_model: runs/spatial/model.pt
+  init_hourly: null             # an hourly checkpoint to continue from (stage 2)
+  from_scratch: false           # true ignores the spatial weights
+  multiscale: []                # e.g. [2, 4, 8, 16] for stage 2
+  val_start: "2020-08-01"       # training uses every hour before it
+  val_end: null
+  # CERRA's analyses, and the forecast lead times [h] that fill the hours between them.
+  analysis_times: ["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00"]
+  forecast_leads: ["1", "2"]
