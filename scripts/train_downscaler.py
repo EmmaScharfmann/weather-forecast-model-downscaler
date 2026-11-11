@@ -522,7 +522,7 @@ def train_spatial(cfg: Config, args: argparse.Namespace) -> int:
     training = cfg.training
     torch.manual_seed(training.seed)
     rng = np.random.default_rng(training.seed)
-    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    device = args.device or hr.default_device()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     pairs_dir = Path(args.pairs or cfg.paths.pairs)
