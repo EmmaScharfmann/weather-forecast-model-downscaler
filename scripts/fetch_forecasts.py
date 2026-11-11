@@ -2,7 +2,7 @@
 
 Usage::
 
-    python scripts/fetch_forecasts.py --config config.yaml --start 2025-08-01 --end 2025-08-31
+    python scripts/fetch_forecasts.py --config config_spatial.yaml --start 2025-08-01 --end 2025-08-31
 
 Every initialisation between ``--start`` and ``--end`` at the configured hours is
 read from the archive in ``forecasts.source`` and written to ``paths.forecasts`` as
@@ -10,7 +10,9 @@ one store per initialisation, which ``downscale_forecasts.py`` and
 ``eval_downscaled.py`` then pick up. Initialisations already fetched are skipped.
 
 Reading from Earthmover needs an account: run ``arraylake auth login`` or set
-``ARRAYLAKE_TOKEN``.
+``ARRAYLAKE_TOKEN``. ``--source open-data`` reads AIFS-ENS from ECMWF's open data
+instead, which needs no account and holds every run since mid-2025; ``open-data:ifs-ens``
+(or another model of ``downscale.open_data.MODELS``) reads another model from it.
 """
 
 from __future__ import annotations
@@ -25,9 +27,11 @@ import pandas as pd
 
 from downscale.config import load_config
 from downscale.constants import COARSE_CROP_MARGIN_DEG
+from downscale.open_data import MODELS, fetch_open_data
 from downscale.sources import available_inits, fetch_forecast, forecast_box, open_forecasts, save_forecast, store_name
 
 logger = logging.getLogger("fetch")
+OPEN_DATA = "open-data"
 
 
 def select_inits(available: pd.DatetimeIndex, start, end, hours: Sequence[int] | None) -> pd.DatetimeIndex:
@@ -68,7 +72,8 @@ def main(argv: Sequence[str] | None = None, archive=None) -> int:
     parser.add_argument("--config", default=None)
     parser.add_argument("--start", required=True, help="first initialisation")
     parser.add_argument("--end", required=True, help="last initialisation")
-    parser.add_argument("--source", default=None, help="overrides forecasts.source")
+    parser.add_argument("--source", default=None, help=f"overrides forecasts.source; {OPEN_DATA!r} reads AIFS-ENS from ECMWF open data, "
+                        f"'{OPEN_DATA}:MODEL' another of {sorted(MODELS)}")
     parser.add_argument("--members", type=int, default=None, help="overrides forecasts.members")
     parser.add_argument("--max-lead-hours", type=int, default=None, help="overrides forecasts.max_lead_hours")
     parser.add_argument("--out", default=None, help="overrides paths.forecasts")
@@ -77,8 +82,19 @@ def main(argv: Sequence[str] | None = None, archive=None) -> int:
 
     cfg = load_config(args.config)
     out = Path(args.out or cfg.paths.forecasts)
-    ds = archive if archive is not None else open_forecasts(args.source or cfg.forecasts.source)
-    inits = select_inits(available_inits(ds), args.start, args.end, cfg.forecasts.init_hours)
+    source = args.source or cfg.forecasts.source
+    open_data = (source == OPEN_DATA or source.startswith(OPEN_DATA + ":")) and archive is None
+    model = source.partition(":")[2] or "aifs-ens"
+    if open_data and model not in MODELS:
+        parser.error(f"unknown open-data model {model!r}; expected one of {sorted(MODELS)}")
+    if open_data:
+        first, last = pd.Timestamp(args.start).floor("D"), pd.Timestamp(args.end).floor("D") + pd.Timedelta(days=1)
+        available = pd.date_range(first, last, freq="6h", inclusive="left")
+        ds = None
+    else:
+        ds = archive if archive is not None else open_forecasts(source)
+        available = available_inits(ds)
+    inits = select_inits(available, args.start, args.end, cfg.forecasts.init_hours)
     if inits.empty:
         parser.error(f"no complete initialisation between {args.start} and {args.end} in the archive")
     box = forecast_box(cfg.region_box, COARSE_CROP_MARGIN_DEG)
@@ -90,7 +106,10 @@ def main(argv: Sequence[str] | None = None, archive=None) -> int:
         if Path(str(out / store_name(init)) + ".done").exists():
             logger.info("skipping %s, already fetched", init)
             continue
-        forecast = fetch_forecast(ds, init, box, cfg.forecasts.variable, members, max_lead)
+        if open_data:
+            forecast = fetch_open_data(init, box, cfg.forecasts.variable, members, max_lead or 360, model=model)
+        else:
+            forecast = fetch_forecast(ds, init, box, cfg.forecasts.variable, members, max_lead)
         logger.info("wrote %s", save_forecast(forecast, out))
         written += 1
     print(f"\n{len(inits)} initialisation(s) in {out}/, {written} fetched now")

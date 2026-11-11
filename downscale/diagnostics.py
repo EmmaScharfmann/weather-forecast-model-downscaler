@@ -381,6 +381,100 @@ def spectrum_figure(comparison: pd.DataFrame, labels: list[str], path) -> None:
     plt.close(fig)
 
 
+def longest_run(times: np.ndarray) -> slice:
+    """The longest stretch of consecutive hours.
+
+    :param times: Sorted times.
+    :type times: numpy.ndarray
+    :returns: Slice selecting it.
+    :rtype: slice
+    """
+    t = np.asarray(times, "datetime64[h]")
+    breaks = np.flatnonzero(np.diff(t) != np.timedelta64(1, "h")) + 1
+    edges = np.concatenate([[0], breaks, [len(t)]])
+    k = int(np.argmax(np.diff(edges)))
+    return slice(int(edges[k]), int(edges[k + 1]))
+
+
+def temporal_spectrum(fields: dict[str, np.ndarray], land: np.ndarray) -> pd.DataFrame:
+    """Power of each land point's series, averaged over land.
+
+    :param fields: Labels mapped to hourly stacks ``(time, y, x)`` or ``(time, member, y, x)``.
+    :type fields: dict[str, numpy.ndarray]
+    :param land: Land mask over ``(y, x)``.
+    :type land: numpy.ndarray
+    :returns: Power per period in hours, one column per label.
+    :rtype: pandas.DataFrame
+    """
+    n = next(iter(fields.values())).shape[0]
+    window = np.hanning(n)
+    frequency = np.fft.rfftfreq(n, d=1.0)[1:]
+    out = pd.DataFrame({"period_h": 1.0 / frequency})
+    for name, stack in fields.items():
+        series = stack[..., land]  # (time, [member,] points)
+        series = series - series.mean(0, keepdims=True)
+        shape = (n,) + (1,) * (series.ndim - 1)
+        power = np.abs(np.fft.rfft(series * window.reshape(shape), axis=0)) ** 2
+        out[name] = power[1:].reshape(len(frequency), -1).mean(1)
+    return out
+
+
+def space_time_spectrum_figure(
+    spatial: pd.DataFrame, temporal: pd.DataFrame, labels: Sequence[str], path,
+    colours: dict[str, str] | None = None, shown: dict[str, str] | None = None,
+) -> None:
+    """Plot spatial and temporal power spectra and their ratio to the first label.
+
+    :param spatial: Output of :func:`spectrum_comparison`.
+    :type spatial: pandas.DataFrame
+    :param temporal: Output of :func:`temporal_spectrum`.
+    :type temporal: pandas.DataFrame
+    :param labels: Column names to plot, the first being the reference.
+    :type labels: collections.abc.Sequence[str]
+    :param path: Destination image.
+    :type path: str | pathlib.Path
+    :param colours: Line colour per label; ``None`` uses the default cycle.
+    :type colours: dict[str, str] | None
+    :param shown: Legend text per label, where it differs from the label.
+    :type shown: dict[str, str] | None
+    :returns: ``None``
+    :rtype: None
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    colours, shown = colours or {}, shown or {}
+    reference = labels[0]
+    fig, ax = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
+    for row, (frame, x, unit, what) in enumerate([
+        (spatial, "wavelength_km", "wavelength (km)", "spatial"),
+        (temporal, "period_h", "period (hours)", "temporal"),
+    ]):
+        for name in labels:
+            style = {"color": colours[name]} if name in colours else {}
+            ax[row, 0].loglog(frame[x], frame[name], marker="o", ms=2, label=shown.get(name, name), **style)
+            if name != reference:
+                ax[row, 1].semilogx(frame[x], frame[name] / frame[reference], marker="o", ms=2,
+                                    label=shown.get(name, name), **style)
+        ax[row, 0].set_title(f"{what} power spectrum over land")
+        ax[row, 0].set_ylabel("power")
+        ax[row, 1].axhline(1.0, color="k", lw=0.8, ls="--")
+        ax[row, 1].set_title(f"relative to the {reference}: too smooth below one, too noisy above")
+        ax[row, 1].set_ylabel(f"power / {reference}")
+        for a in ax[row]:
+            a.set_xlabel(unit)
+            a.invert_xaxis()
+            a.grid(alpha=0.3, which="both")
+            a.legend(fontsize=8)
+    for period in (3, 6, 12, 24):
+        for a in ax[1]:
+            a.axvline(period, color="0.8", lw=0.6, zorder=0)
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+
+
 def diverging_white_cmap():
     """Colour map running red through white to green, with white at the midpoint.
 

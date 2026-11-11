@@ -2,7 +2,7 @@
 
 Usage::
 
-    python scripts/check_predictability.py --config config.yaml
+    python scripts/check_predictability.py --config config_spatial.yaml
 
 The downscaler sees the coarse field, static terrain and the calendar. Anything
 it can learn about a given pixel is therefore a function of the time of year and

@@ -245,6 +245,38 @@ def fair_crps(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | Non
     return score.mean() if mask is None else score[:, mask].mean()
 
 
+def multiscale_fair_crps(
+    pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None, factors=(2, 4, 8, 16)
+) -> torch.Tensor:
+    """Fair CRPS at full resolution and on fields averaged over blocks of several sizes.
+
+    Per pixel, CRPS only sees how far members spread at each point, not over which distance they differ, so
+    noise texture at the wrong scale costs nothing as long as the spread is right. Scoring block averages
+    too penalises members whose differences sit at the wrong scale. Averages are taken over the retained
+    pixels only, and a block counts when most of it is retained.
+
+    :param pred: Ensemble of shape ``(batch, members, height, width)``.
+    :type pred: torch.Tensor
+    :param target: Truth of shape ``(batch, height, width)``.
+    :type target: torch.Tensor
+    :param mask: Boolean grid of shape ``(height, width)``; ``None`` keeps every pixel.
+    :type mask: torch.Tensor | None
+    :param factors: Block sizes in pixels.
+    :type factors: collections.abc.Sequence[int]
+    :returns: Scalar loss, the mean of the score at every scale.
+    :rtype: torch.Tensor
+    """
+    weight = (torch.ones_like(target[0]) if mask is None else mask.to(pred.dtype))[None, None]
+    scores = [fair_crps(pred, target, mask)]
+    for factor in factors:
+        covered = F.avg_pool2d(weight, factor, ceil_mode=True)
+        blocks = covered.clamp_min(1e-6)
+        pooled_pred = F.avg_pool2d(pred * weight, factor, ceil_mode=True) / blocks
+        pooled_target = F.avg_pool2d(target[:, None] * weight, factor, ceil_mode=True)[:, 0] / blocks[:, 0]
+        scores.append(fair_crps(pooled_pred, pooled_target, covered[0, 0] > 0.5))
+    return torch.stack(scores).mean()
+
+
 def mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
     """Mean squared error of the first member, averaged over the retained pixels.
 

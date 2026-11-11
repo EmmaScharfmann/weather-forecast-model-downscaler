@@ -6,8 +6,8 @@ input and the baseline it has to beat.
 
 Usage::
 
-    python scripts/build_pairs.py --config config.yaml
-    python scripts/build_pairs.py --config config.yaml --consolidate
+    python scripts/build_pairs.py --config config_spatial.yaml
+    python scripts/build_pairs.py --config config_spatial.yaml --consolidate
 
 Months whose target file is not downloaded yet are reported as pending, so this
 can run alongside the download.
@@ -394,10 +394,15 @@ def main(argv: Sequence[str] | None = None, source=None, geopotential=None) -> i
     parser.add_argument("--out", default=None, help="overrides paths.pairs")
     parser.add_argument("--batch", type=int, default=None, help="overrides coarse.fetch_batch")
     parser.add_argument("--consolidate", action="store_true")
+    parser.add_argument("--coarse-source", choices=["era5", "era5-arco"], default=None,
+                        help="overrides coarse.source; era5 reads Earthmover, falling back to Google's public copy "
+                        "when it cannot be opened, era5-arco reads Google's copy only")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     cfg = load_config(args.config)
+    if args.coarse_source:
+        cfg.coarse.source = args.coarse_source
     target_dir = Path(args.target or cfg.paths.target)
     out = Path(args.out or cfg.paths.pairs)
 
@@ -407,11 +412,9 @@ def main(argv: Sequence[str] | None = None, source=None, geopotential=None) -> i
 
     static = xr.open_zarr(target_dir / "static.zarr")
     if source is None or geopotential is None:
-        if cfg.coarse.source != "era5":
-            raise ValueError(f"coarse.source {cfg.coarse.source!r} is not supported; only 'era5' is")
-        from downscale.sources import ERA5
+        from downscale.sources import open_era5
 
-        era5 = ERA5()
+        era5 = open_era5(cfg.coarse.source)
         source = source or era5
         geopotential = geopotential if geopotential is not None else era5.surface_geopotential()
     coarse = CoarseOnTargetGrid(

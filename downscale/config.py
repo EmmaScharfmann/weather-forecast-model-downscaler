@@ -1,4 +1,9 @@
-"""Typed access to ``config.yaml``."""
+"""Typed access to the YAML configuration.
+
+``config_spatial.yaml`` configures the spatial downscaler and everything shared. ``config_temporal.yaml``
+starts with ``extends: config_spatial.yaml`` and lists only what the hourly (temporal) downscaler changes,
+plus its own ``temporal`` section, so a diff of the two files is exactly what is specific to it.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +15,9 @@ import yaml
 
 from .constants import REGION_PRESETS
 
-DEFAULT_CONFIG_PATH = Path("config.yaml")
+DEFAULT_CONFIG_PATH = Path("config_spatial.yaml")
+#: Times of CERRA's three-hourly analyses.
+CERRA_ANALYSIS_TIMES = [f"{h:02d}:00" for h in range(0, 24, 3)]
 Region = tuple[float, float, float, float]
 T = TypeVar("T")
 
@@ -62,6 +69,12 @@ class TargetConfig:
     train_years: list[int] = field(default_factory=lambda: [2014, 2019])
     times: list[str] = field(default_factory=lambda: ["00:00", "06:00", "12:00", "18:00"])
     cds_workers: int = 2
+    #: Fetch every hour, from the analyses and the forecasts between them, instead of ``times``.
+    hourly: bool = False
+    #: ``[start, end]`` day ranges to download instead of whole ``years``; ``None`` uses ``years``.
+    periods: list[list[str]] | None = None
+    #: Published dataset whose crop to adopt, so the grid matches models trained on it.
+    crop_like: str | None = None
 
 
 @dataclass
@@ -142,6 +155,26 @@ class EvaluationConfig:
 
 
 @dataclass
+class TemporalConfig:
+    """The hourly (temporal) downscaler, which fills the hours between 6-hourly coarse steps."""
+
+    #: Spatial model the hourly one starts from and is compared with.
+    spatial_model: str = "runs/spatial/model.pt"
+    #: Hourly checkpoint to continue from, keeping its statistics; ``None`` starts from ``spatial_model``.
+    init_hourly: str | None = None
+    #: Start from random weights instead of the spatial model's.
+    from_scratch: bool = False
+    #: Block sizes in pixels whose averages are also scored by the loss; empty for the plain CRPS.
+    multiscale: list[int] = field(default_factory=list)
+    #: First and last validation time; training uses the hours before ``val_start``.
+    val_start: str | None = None
+    val_end: str | None = None
+    #: CERRA analysis times, and the forecast lead times [h] that fill the hours between them.
+    analysis_times: list[str] = field(default_factory=lambda: list(CERRA_ANALYSIS_TIMES))
+    forecast_leads: list[str] = field(default_factory=lambda: ["1", "2"])
+
+
+@dataclass
 class Config:
     """Full pipeline configuration."""
 
@@ -154,6 +187,7 @@ class Config:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
+    temporal: TemporalConfig = field(default_factory=TemporalConfig)
 
     @property
     def region_box(self) -> Region:
@@ -194,10 +228,51 @@ def _build(cls: type[T], values: dict[str, Any] | None) -> T:
     return cls(**values)
 
 
+def _read(path: Path, seen: tuple[Path, ...] = ()) -> dict:
+    """Read a YAML file, merging it over the file it ``extends``.
+
+    :param path: File to read.
+    :type path: pathlib.Path
+    :param seen: Files already being read, to reject a cycle.
+    :type seen: tuple[pathlib.Path, ...]
+    :returns: Sections mapped to their values.
+    :rtype: dict
+    :raises FileNotFoundError: If the file does not exist.
+    :raises ValueError: If files extend each other in a cycle.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"configuration file not found: {path}")
+    if path.resolve() in seen:
+        raise ValueError(f"configuration files extend each other in a cycle: {path}")
+    raw = yaml.safe_load(path.read_text()) or {}
+    parent = raw.pop("extends", None)
+    if parent is None:
+        return raw
+    base = _read(path.parent / parent, (*seen, path.resolve()))
+    return _merge(base, raw)
+
+
+def _merge(base: dict, raw: dict) -> dict:
+    """Replace a base configuration's values, section by section.
+
+    :param base: Sections mapped to their values.
+    :type base: dict
+    :param raw: Sections mapped to the values replacing them.
+    :type raw: dict
+    :returns: The merged sections.
+    :rtype: dict
+    """
+    out = {k: dict(v or {}) for k, v in base.items()}
+    for section, values in raw.items():
+        out[section] = {**out.get(section, {}), **(values or {})}
+    return out
+
+
 def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
     """Load the pipeline configuration.
 
-    :param path: Path to a YAML file; ``None`` uses ``config.yaml`` if present, else defaults.
+    :param path: Path to a YAML file; ``None`` uses ``config_spatial.yaml`` if present, else defaults. A file
+        may name another in ``extends``, relative to itself, and then holds only what it changes.
     :type path: str | pathlib.Path | None
     :param overrides: Section names mapped to dictionaries of values replacing the file's.
     :type overrides: typing.Any
@@ -206,15 +281,10 @@ def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
     :raises FileNotFoundError: If ``path`` is given but does not exist.
     """
     if path is None:
-        raw = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text()) if DEFAULT_CONFIG_PATH.exists() else {}
+        raw = _read(DEFAULT_CONFIG_PATH) if DEFAULT_CONFIG_PATH.exists() else {}
     else:
-        p = Path(path)
-        if not p.exists():
-            raise FileNotFoundError(f"configuration file not found: {p}")
-        raw = yaml.safe_load(p.read_text()) or {}
-    for section, values in overrides.items():
-        raw.setdefault(section, {})
-        raw[section] = {**(raw[section] or {}), **values}
+        raw = _read(Path(path))
+    raw = _merge(raw, overrides)
     sections = {f.name: f.type for f in fields(Config)}
     unknown = set(raw) - set(sections)
     if unknown:

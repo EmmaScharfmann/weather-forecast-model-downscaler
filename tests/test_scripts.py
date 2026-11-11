@@ -129,6 +129,52 @@ def test_download_crops_checks_and_consolidates(config, fake_cds, tmp_path):
     assert consolidated.sizes["time"] == 365 * 4
 
 
+def test_hourly_download_fills_the_hours_between_analyses_from_forecasts(config, fake_cds):
+    client, opener = fake_cds
+    out = Path(config.paths.target)
+    out.mkdir(parents=True)
+    download_cerra.do_static(config, out, client=client, opener=opener)
+
+    def forecast_opener(path):
+        request = json.loads(Path(path).read_text())
+        ds = opener(path)
+        if "leadtime_hour" not in request:
+            return ds
+        steps = pd.to_timedelta([int(h) for h in request["leadtime_hour"]], "h").to_numpy()
+        valid = ds.time.values[:, None] + steps[None, :]
+        ds = ds.drop_vars(["step", "valid_time"]).expand_dims(step=steps, axis=1)
+        return ds.assign_coords(valid_time=(("time", "step"), valid))
+
+    tag, problems = download_cerra.do_month(
+        config, out, 2014, 2, client=client, opener=forecast_opener, hourly=True, days=[3, 4]
+    )
+    assert problems == []
+    month = xr.open_zarr(out / "months" / "t2m_201402.zarr")
+    assert month.sizes["time"] == 48
+    assert pd.DatetimeIndex(month.time.values)[0] == pd.Timestamp("2014-02-03")
+    assert sorted(r["product_type"] for r in client.requests[-2:]) == ["analysis", "forecast"]
+
+
+def test_a_published_crop_is_adopted_and_a_conflicting_one_refused(config, fake_cds, tmp_path):
+    client, opener = fake_cds
+    published = tmp_path / "published"
+    published.mkdir()
+    out = Path(config.paths.target)
+    out.mkdir(parents=True)
+    download_cerra.do_static(config, out, client=client, opener=opener)
+    crop = json.loads((out / "crop.json").read_text())
+    smaller = {**crop, "y0": crop["y0"] + 1, "x1": crop["x1"] - 1}
+    (published / "manifest.json").write_text(json.dumps({"crop": smaller}))
+    with pytest.raises(ValueError, match="different crop"):
+        download_cerra.adopt_crop(out, str(published))
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    download_cerra.adopt_crop(fresh, str(published))
+    download_cerra.do_static(config, fresh, client=client, opener=opener)
+    static = xr.open_zarr(fresh / "static.zarr")
+    assert (static.sizes["y"], static.sizes["x"]) == (smaller["y1"] - smaller["y0"], smaller["x1"] - smaller["x0"])
+
+
 def test_download_flags_a_month_with_missing_times(config, fake_cds):
     client, opener = fake_cds
     out = Path(config.paths.target)
@@ -242,6 +288,16 @@ def test_downscaling_produces_an_ensemble_on_the_fine_grid(
     expected = (300 - 0.0065 * terrain(static_fields["lat"], static_fields["lon"])) + diurnal(6)
     assert np.abs(result.t2m_interp.isel(time=0, lead_time=0, ensemble=0).values - expected).mean() < 0.5
     assert (Path(config.paths.downscaled) / "map_check.png").exists()
+
+    import movie_hourly
+
+    movie = Path(config.paths.downscaled) / "spatial.gif"
+    status = movie_hourly.main([
+        "--config", str(config_path), "--forecast", str(forecast_store / "forecast_2023-08-05.zarr"),
+        "--downscaled", str(Path(config.paths.downscaled) / "forecast_2023-08-05.zarr"), "--hours", "2",
+        "--out", str(movie),
+    ])
+    assert status == 0 and movie.stat().st_size > 0
 
 
 def test_fetched_aifs_ens_forecasts_can_be_downscaled(config, config_path, trained_model, static_fields, tmp_path):
@@ -400,3 +456,52 @@ def test_spectrum_script_reports_a_ratio_to_the_target(config_path, tmp_path, tr
     comparison = pd.read_csv(out / "spectrum.csv")
     assert {"target", "coarse", "model member", "model mean"} <= set(comparison.columns)
     assert (comparison.wavelength_km.diff().dropna() < 0).all()
+
+def test_hourly_forecasts_are_written_for_every_hour_and_scored_against_stations(
+    config, config_path, forecast_store, trained_model, static_fields, stats, tmp_path
+):
+    torch_modules()
+    import torch
+
+    import downscale_hourly
+    from downscale import hourly
+
+    torch.manual_seed(0)
+    net = hourly.HourlyNet(hourly.HourlyConfig(loss="crps", base=8, depth=3, noise_channels=4))
+    with torch.no_grad():
+        for parameter in net.unet.out.parameters():
+            parameter.normal_(0, 0.05)
+    hourly_path = tmp_path / "hourly.pt"
+    hourly.HourlyDownscaler(net, {**stats, "tendency": {"mean": 0.0, "std": 2.0}}, static_fields).save(hourly_path)
+    out = tmp_path / "hourly_out"
+    status = downscale_hourly.main([
+        "--config", str(config_path), "--hourly", str(hourly_path), "--spatial", str(trained_model),
+        "--forecasts", *sorted(str(p) for p in forecast_store.glob("*.zarr")),
+        "--out", str(out), "--samples", "2", "--device", "cpu",
+    ])
+    assert status == 0
+    name = "forecast_2023-08-05.zarr"
+    coarse = xr.open_zarr(out / "forecasts" / name)
+    fine, spatial = xr.open_zarr(out / "hourly" / name), xr.open_zarr(out / "spatial" / name)
+    assert coarse.sizes["lead_time"] == 66  # +6 h to +71 h
+    assert (out / "forecasts" / f"{name}.done").exists()
+    assert np.array_equal(fine.lead_time.values, spatial.lead_time.values)
+    assert np.allclose(fine.t2m_interp.values, spatial.t2m_interp.values, atol=1e-3)
+    assert fine.t2m_ds.shape == (1, 66, 3, 2, *static_fields["lat"].shape)
+
+    config.evaluation.n_bootstrap = 20
+    summary = eval_downscaled.run(
+        config, sorted(str(p) for p in (out / "forecasts").glob("*.zarr")),
+        sorted(str(p) for p in (out / "hourly").glob("*.zarr")), tmp_path / "eval", provider=_StationProvider(),
+    )
+    by_lead = pd.read_csv(tmp_path / "eval" / "by_lead.csv")
+    assert sorted(by_lead.lead_h.unique())[:3] == [6, 7, 8]
+    assert np.isfinite(summary["rmse_K"]["downscaled"])
+
+    import movie_hourly
+
+    movie = tmp_path / "movie.gif"
+    status = movie_hourly.main([
+        "--config", str(config_path), "--run", str(out), "--name", name, "--hours", "3", "--out", str(movie),
+    ])
+    assert status == 0 and movie.stat().st_size > 0

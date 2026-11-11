@@ -5,11 +5,18 @@ Requires a Copernicus Climate Data Store account, credentials in
 
 Usage::
 
-    python scripts/download_cerra.py --config config.yaml
-    python scripts/download_cerra.py --config config.yaml --consolidate
+    python scripts/download_cerra.py --config config_spatial.yaml
+    python scripts/download_cerra.py --config config_spatial.yaml --consolidate
+    python scripts/download_cerra.py --config config_temporal.yaml
 
 One request is issued per month and each month is written to its own store, so
 rerunning the command resumes an interrupted download.
+
+``target.hourly`` (set in ``config_temporal.yaml``, or ``--hourly``) fetches every hour
+instead of ``target.times``: CERRA analyses exist at ``temporal.analysis_times``, every
+three hours, so the hours after each come from its ``temporal.forecast_leads`` forecasts.
+``target.periods`` restricts the download to ranges of days; ``--start`` and ``--end``
+replace it with a single range.
 """
 
 from __future__ import annotations
@@ -33,10 +40,12 @@ from downscale.constants import G, T2M_RANGE_K
 
 logger = logging.getLogger("cerra")
 
+HOURLY_TIMES = [f"{h:02d}:00" for h in range(24)]
+
 
 def build_request(
     dataset_variables: Sequence[str], year: int, month: int, times: Sequence[str],
-    days: Sequence[int] | None = None,
+    days: Sequence[int] | None = None, leadtimes: Sequence[str] | None = None,
 ) -> dict:
     """Build one Climate Data Store request.
 
@@ -50,14 +59,18 @@ def build_request(
     :type times: collections.abc.Sequence[str]
     :param days: Days of month; ``None`` requests the whole month.
     :type days: collections.abc.Sequence[int] | None
+    :param leadtimes: Forecast lead times in hours; ``None`` requests analyses.
+    :type leadtimes: collections.abc.Sequence[str] | None
     :returns: Request body.
     :rtype: dict
     """
     n_days = calendar.monthrange(year, month)[1]
+    extra = {"leadtime_hour": list(leadtimes)} if leadtimes else {}
     return {
         "level_type": "surface_or_atmosphere",
         "data_type": "reanalysis",
-        "product_type": "analysis",
+        "product_type": "forecast" if leadtimes else "analysis",
+        **extra,
         "variable": list(dataset_variables),
         "year": str(year),
         "month": f"{month:02d}",
@@ -101,6 +114,20 @@ def open_grib(path: Path) -> xr.Dataset:
     :rtype: xarray.Dataset
     """
     return xr.open_dataset(path, engine="cfgrib", backend_kwargs={"indexpath": ""})
+
+
+def split_steps(ds: xr.Dataset) -> list[xr.Dataset]:
+    """Split a forecast decoded over ``(time, step)`` into one dataset per lead time.
+
+    :param ds: Dataset as decoded from GRIB.
+    :type ds: xarray.Dataset
+    :returns: The dataset itself when it has no ``step`` dimension, otherwise one dataset per step,
+        each with a one-dimensional ``valid_time`` that :func:`standardise` turns into its time.
+    :rtype: list[xarray.Dataset]
+    """
+    if "step" not in ds.dims:
+        return [ds]
+    return [ds.isel(step=i) for i in range(ds.sizes["step"])]
 
 
 def standardise(ds: xr.Dataset) -> xr.Dataset:
@@ -185,7 +212,9 @@ def _clean(ds: xr.Dataset) -> xr.Dataset:
     return ds
 
 
-def expected_times(year: int, month: int, times: Sequence[str]) -> pd.DatetimeIndex:
+def expected_times(
+    year: int, month: int, times: Sequence[str], days: Sequence[int] | None = None
+) -> pd.DatetimeIndex:
     """List every timestamp a complete month should contain.
 
     :param year: Calendar year.
@@ -194,15 +223,64 @@ def expected_times(year: int, month: int, times: Sequence[str]) -> pd.DatetimeIn
     :type month: int
     :param times: Times of day as ``"HH:MM"``.
     :type times: collections.abc.Sequence[str]
+    :param days: Days of month; ``None`` expects the whole month.
+    :type days: collections.abc.Sequence[int] | None
     :returns: Expected timestamps.
     :rtype: pandas.DatetimeIndex
     """
+    days = days or range(1, calendar.monthrange(year, month)[1] + 1)
+    dates = [pd.Timestamp(year, month, d) for d in days]
+    return pd.DatetimeIndex([d + pd.Timedelta(t + ":00") for d in dates for t in times])
+
+
+def month_days(year: int, month: int, periods: Sequence[Sequence[str]] | None) -> list[int] | None:
+    """The days of a month that fall inside any of some date ranges.
+
+    :param year: Calendar year.
+    :type year: int
+    :param month: Calendar month.
+    :type month: int
+    :param periods: ``[start, end]`` day ranges, either end ``None`` for no bound; ``None`` for no ranges.
+    :type periods: collections.abc.Sequence[collections.abc.Sequence[str]] | None
+    :returns: The days, or ``None`` when the whole month is inside the ranges.
+    :rtype: list[int] | None
+    """
     n_days = calendar.monthrange(year, month)[1]
-    days = pd.date_range(f"{year}-{month:02d}-01", periods=n_days, freq="D")
-    return pd.DatetimeIndex([d + pd.Timedelta(t + ":00") for d in days for t in times])
+    if not periods:
+        return None
+    bounds = [
+        (pd.Timestamp(start).normalize() if start else pd.Timestamp.min,
+         pd.Timestamp(end).normalize() if end else pd.Timestamp.max)
+        for start, end in periods
+    ]
+    days = [d for d in range(1, n_days + 1) if any(a <= pd.Timestamp(year, month, d) <= b for a, b in bounds)]
+    return None if len(days) == n_days else days
 
 
-def check_month(ds: xr.Dataset, year: int, month: int, times: Sequence[str]) -> list[str]:
+def months_of(years: Sequence[int], periods: Sequence[Sequence[str]] | None) -> list[tuple[int, int]]:
+    """The months to download: every month of ``years``, or those touched by ``periods``.
+
+    :param years: First and last year, inclusive.
+    :type years: collections.abc.Sequence[int]
+    :param periods: ``[start, end]`` day ranges, or ``None``.
+    :type periods: collections.abc.Sequence[collections.abc.Sequence[str]] | None
+    :returns: ``(year, month)`` pairs in order.
+    :rtype: list[tuple[int, int]]
+    """
+    first, last = int(years[0]), int(years[1])
+    if not periods:
+        return [(y, m) for y in range(first, last + 1) for m in range(1, 13)]
+    months = set()
+    for start, end in periods:
+        start = pd.Timestamp(start or f"{first}-01-01")
+        end = pd.Timestamp(end or f"{last}-12-31")
+        months |= {(d.year, d.month) for d in pd.date_range(start.replace(day=1), end, freq="MS")}
+    return sorted(months)
+
+
+def check_month(
+    ds: xr.Dataset, year: int, month: int, times: Sequence[str], days: Sequence[int] | None = None
+) -> list[str]:
     """Check one month for missing, duplicate or implausible values.
 
     :param ds: Cropped month with a ``t2m`` variable.
@@ -213,12 +291,14 @@ def check_month(ds: xr.Dataset, year: int, month: int, times: Sequence[str]) -> 
     :type month: int
     :param times: Expected times of day.
     :type times: collections.abc.Sequence[str]
+    :param days: Expected days; ``None`` expects the whole month.
+    :type days: collections.abc.Sequence[int] | None
     :returns: Human-readable problems; empty when the month is sound.
     :rtype: list[str]
     """
     problems = []
     found = pd.DatetimeIndex(ds["time"].values)
-    missing = expected_times(year, month, times).difference(found)
+    missing = expected_times(year, month, times, days).difference(found)
     if len(missing):
         problems.append(f"{len(missing)} missing time(s), e.g. {list(missing[:3])}")
     if found.has_duplicates:
@@ -254,6 +334,31 @@ def load_or_make_crop(out: Path, standardised: xr.Dataset, box) -> dict:
         crop["y0"], crop["y1"], crop["x0"], crop["x1"], crop["grid_shape"],
         crop["y1"] - crop["y0"], crop["x1"] - crop["x0"],
     )
+    return crop
+
+
+def adopt_crop(out: Path, like: str) -> dict:
+    """Use the crop of a published dataset, so a new download lands on the same grid.
+
+    :param out: Output directory.
+    :type out: pathlib.Path
+    :param like: Local folder or Hub dataset whose ``manifest.json`` records its crop.
+    :type like: str
+    :returns: The crop, written to ``crop.json``.
+    :rtype: dict
+    :raises ValueError: If the dataset records no crop, or this download already has a different one.
+    """
+    from downscale.fetch import _manifest
+
+    manifest = _manifest(like)
+    if not manifest or "crop" not in manifest:
+        raise ValueError(f"{like} records no crop in its manifest")
+    crop = manifest["crop"]
+    path = out / "crop.json"
+    if path.exists() and json.loads(path.read_text()) != crop:
+        raise ValueError(f"{path} holds a different crop than {like}: use a fresh output directory")
+    path.write_text(json.dumps(crop, indent=2))
+    logger.info("using the crop of %s: y %d:%d, x %d:%d", like, crop["y0"], crop["y1"], crop["x0"], crop["x1"])
     return crop
 
 
@@ -311,7 +416,7 @@ def do_static(cfg: Config, out: Path, client=None, opener: Callable = open_grib)
 
 def do_month(
     cfg: Config, out: Path, year: int, month: int, keep_grib: bool = False,
-    client=None, opener: Callable = open_grib,
+    client=None, opener: Callable = open_grib, hourly: bool = False, days: Sequence[int] | None = None,
 ) -> tuple[str, list[str]]:
     """Download, crop and check one month.
 
@@ -329,6 +434,11 @@ def do_month(
     :type client: typing.Any
     :param opener: Callable opening a GRIB file, replaceable for testing.
     :type opener: typing.Callable
+    :param hourly: Fetch every hour, from the analyses and the forecasts after them
+        (``temporal.analysis_times`` and ``temporal.forecast_leads``), instead of ``target.times``.
+    :type hourly: bool
+    :param days: Days of the month to fetch; ``None`` fetches all of them.
+    :type days: collections.abc.Sequence[int] | None
     :returns: The month tag and any problems found; nothing is written when problems exist.
     :rtype: tuple[str, list[str]]
     :raises KeyError: If the target variable is absent from the response.
@@ -337,18 +447,32 @@ def do_month(
     target = out / "months" / f"t2m_{tag}.zarr"
     if target.exists():
         return tag, []
-    grib = out / "grib" / f"t2m_{tag}.grib"
-    if not grib.exists():
-        logger.info("requesting %s", tag)
-        retrieve(cfg.target.dataset, build_request([cfg.target.variable], year, month, cfg.target.times), grib, client)
-    ds = standardise(opener(grib))
+    variable = [cfg.target.variable]
+    if hourly:
+        requests = {
+            out / "grib" / f"t2m_{tag}_an.grib": build_request(
+                variable, year, month, cfg.temporal.analysis_times, days
+            ),
+            out / "grib" / f"t2m_{tag}_fc.grib": build_request(
+                variable, year, month, cfg.temporal.analysis_times, days, leadtimes=cfg.temporal.forecast_leads
+            ),
+        }
+    else:
+        requests = {out / "grib" / f"t2m_{tag}.grib": build_request(variable, year, month, cfg.target.times, days)}
+    parts = []
+    for grib, request in requests.items():
+        if not grib.exists():
+            logger.info("requesting %s %s", tag, request["product_type"])
+            retrieve(cfg.target.dataset, request, grib, client)
+        parts += [standardise(part) for part in split_steps(opener(grib))]
+    ds = xr.concat(parts, "time") if len(parts) > 1 else parts[0]
     ds = apply_crop(ds, load_or_make_crop(out, ds, cfg.region_box))
     name = next((v for v in ds.data_vars if v in ("t2m", "2t")), None)
     if name is None:
         raise KeyError(f"2 m temperature not found; variables: {list(ds.data_vars)}")
     ds = ds[[name]].rename({name: "t2m"}).sortby("time")
     ds["t2m"] = ds["t2m"].astype("f4").assign_attrs(units="K")
-    problems = check_month(ds, year, month, cfg.target.times)
+    problems = check_month(ds, year, month, HOURLY_TIMES if hourly else cfg.target.times, days)
     if problems:
         return tag, problems
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -357,24 +481,28 @@ def do_month(
     _clean(ds.load()).to_zarr(tmp, mode="w")
     tmp.rename(target)
     if not keep_grib:
-        grib.unlink()
+        for grib in requests:
+            grib.unlink()
     return tag, []
 
 
-def consolidate(cfg: Config, out: Path) -> Path:
+def consolidate(cfg: Config, out: Path, months: Sequence[tuple[int, int]] | None = None) -> Path:
     """Merge the downloaded months into a single store.
 
     :param cfg: Pipeline configuration.
     :type cfg: downscale.config.Config
     :param out: Output directory.
     :type out: pathlib.Path
+    :param months: ``(year, month)`` pairs to merge; ``None`` merges every month of ``target.years``.
+    :type months: collections.abc.Sequence[tuple[int, int]] | None
     :returns: Path to the consolidated store.
     :rtype: pathlib.Path
     :raises FileNotFoundError: If any month is still missing.
     :raises ValueError: If the static grid and the monthly grid differ.
     """
     first, last = cfg.target.years
-    tags = [f"{y}{m:02d}" for y in range(int(first), int(last) + 1) for m in range(1, 13)]
+    months = months or [(y, m) for y in range(int(first), int(last) + 1) for m in range(1, 13)]
+    tags = [f"{y}{m:02d}" for y, m in months]
     paths = [out / "months" / f"t2m_{t}.zarr" for t in tags]
     missing = [p.name for p in paths if not p.exists()]
     if missing:
@@ -389,8 +517,8 @@ def consolidate(cfg: Config, out: Path) -> Path:
         raise ValueError("the static grid and the monthly grid differ")
     ds.attrs = {
         "source": f"{cfg.target.dataset}, cropped",
-        "years": f"{first}-{last}",
-        "times_utc": ",".join(cfg.target.times),
+        "years": f"{tags[0][:4]}-{tags[-1][:4]}",
+        "times_utc": ",".join(sorted({f"{t.hour:02d}:00" for t in times})),
         "license": "Copernicus licence; contains modified Copernicus Climate Change Service information",
     }
     target = out / "target.zarr"
@@ -452,29 +580,51 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--keep-grib", action="store_true")
     parser.add_argument("--consolidate", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="print the requests and exit")
+    parser.add_argument("--hourly", action="store_true", default=None, help="overrides target.hourly")
+    parser.add_argument("--start", default=None, help="first day, overriding target.periods and target.years")
+    parser.add_argument("--end", default=None, help="last day, overriding target.periods and target.years")
+    parser.add_argument(
+        "--crop-like", default=None, metavar="DATASET",
+        help="overrides target.crop_like: take the crop from a published dataset's manifest, "
+        "e.g. EmmaScharfmann/cerra-france-t2m-2016-2020, so the grid matches models trained on it",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     cfg = load_config(args.config)
     out = Path(args.out or cfg.paths.target)
     out.mkdir(parents=True, exist_ok=True)
+    hourly = cfg.target.hourly if args.hourly is None else args.hourly
+    crop_like = args.crop_like or cfg.target.crop_like
+    if crop_like:
+        adopt_crop(out, crop_like)
     workers = args.workers or cfg.target.cds_workers
-    first, last = int(cfg.target.years[0]), int(cfg.target.years[1])
-    months = [(y, m) for y in range(first, last + 1) for m in range(1, 13)]
+    first = int(cfg.target.years[0])
+    periods = [[args.start, args.end]] if args.start or args.end else cfg.target.periods
+    months = months_of(cfg.target.years, periods)
+    days = {(y, m): month_days(y, m, periods) for y, m in months}
 
     if args.consolidate:
-        consolidate(cfg, out)
+        consolidate(cfg, out, months)
         return 0
     if args.dry_run:
+        times = cfg.temporal.analysis_times if hourly else cfg.target.times
         print(json.dumps(build_request(cfg.target.static_variables, first, 1, ["00:00"], days=[1]), indent=1))
-        print(json.dumps(build_request([cfg.target.variable], *months[0], cfg.target.times), indent=1))
-        print(f"... {len(months)} monthly requests in total")
+        print(json.dumps(build_request([cfg.target.variable], *months[0], times, days[months[0]]), indent=1))
+        if hourly:
+            print(json.dumps(build_request(
+                [cfg.target.variable], *months[0], times, days[months[0]], leadtimes=cfg.temporal.forecast_leads
+            ), indent=1))
+        print(f"... {len(months)} month(s) in total")
         return 0
 
     do_static(cfg, out)
     failed: dict[str, list[str]] = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(do_month, cfg, out, y, m, args.keep_grib): (y, m) for y, m in months}
+        futures = {
+            pool.submit(do_month, cfg, out, y, m, args.keep_grib, hourly=hourly, days=days[(y, m)]): (y, m)
+            for y, m in months
+        }
         for n, future in enumerate(as_completed(futures), 1):
             year, month = futures[future]
             try:

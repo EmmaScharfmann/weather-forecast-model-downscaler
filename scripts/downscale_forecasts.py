@@ -2,7 +2,7 @@
 
 Usage::
 
-    python scripts/downscale_forecasts.py --config config.yaml --model runs/crps/model.pt
+    python scripts/downscale_forecasts.py --config config_spatial.yaml --model runs/crps/model.pt
 
 Each coarse member yields several plausible fine-scale maps, so a ten-member
 forecast becomes a larger downscaled ensemble. Initialisations already

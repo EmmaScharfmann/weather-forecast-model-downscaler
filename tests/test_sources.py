@@ -172,3 +172,30 @@ def test_a_downscaled_store_is_replaced_only_when_complete(tmp_path):
     save_downscaled(first + 1, path)
     assert float(xr.open_zarr(path).t2m_ds.mean()) == 1
     assert not (tmp_path / "run.zarr.tmp").exists()
+
+
+def test_without_earthmover_the_public_era5_copy_is_read_with_a_filled_surface_geopotential(monkeypatch):
+    from downscale import sources
+
+    lat, lon = np.arange(90.0, -90.25, -45.0), np.arange(0.0, 360.0, 90.0)
+    times = pd.to_datetime(["1940-01-01", "2000-01-01", "2020-08-01"])
+    surface = np.full((3, lat.size, lon.size), np.nan)
+    surface[1:] = 9.81 * 100
+    ds = xr.Dataset(
+        {
+            "2m_temperature": (("time", "latitude", "longitude"), np.full((3, lat.size, lon.size), 290.0)),
+            "geopotential_at_surface": (("time", "latitude", "longitude"), surface),
+            "u_component_of_wind": (("time", "latitude", "longitude"), np.zeros((3, lat.size, lon.size))),
+        },
+        coords={"time": times, "latitude": lat, "longitude": lon},
+    )
+    monkeypatch.setattr(sources.xr, "open_zarr", lambda *args, **kwargs: ds)
+
+    def no_account(*args, **kwargs):
+        raise FileNotFoundError("~/.arraylake/token.json")
+
+    monkeypatch.setattr(sources, "open_arraylake", no_account)
+    era5 = sources.open_era5("era5")  # Earthmover cannot be opened, so Google's copy is read
+    assert list(era5.ds.data_vars) == ["2m_temperature"]
+    assert float(era5.surface_geopotential().min()) == pytest.approx(981.0)
+    assert float(era5(["2020-08-01"], ["t2m"]).mean()) == 290.0
