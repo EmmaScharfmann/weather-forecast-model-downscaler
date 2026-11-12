@@ -302,7 +302,7 @@ class HourlyDownscaler(Downscaler):
     @torch.no_grad()
     def predict_hours(
         self, c0: np.ndarray, c1: np.ndarray, offset_hours: np.ndarray, valid_times, members: int = 4,
-        batch: int = 8, noise: np.ndarray | None = None, seed: int = 0,
+        batch: int = 8, noise: np.ndarray | None = None, seed: int = 0, noise_hours: float | None = None,
     ) -> np.ndarray:
         """Fine fields at some hours inside coarse windows.
 
@@ -323,6 +323,11 @@ class HourlyDownscaler(Downscaler):
         :type noise: numpy.ndarray | None
         :param seed: Seed for the shared noise when ``noise`` is not given.
         :type seed: int
+        :param noise_hours: Correlation time [h] of the noise: ``None`` keeps it fixed, otherwise it drifts as an
+            AR(1) process along ``valid_times``, ``rho = exp(-gap / noise_hours)``, so that each hour still sees
+            noise distributed as in training while its detail changes over a few hours. A gap that is not
+            positive starts afresh.
+        :type noise_hours: float | None
         :returns: Fine fields [K], ``(n, members, y, x)``.
         :rtype: numpy.ndarray
         """
@@ -337,13 +342,29 @@ class HourlyDownscaler(Downscaler):
                 shared = torch.from_numpy(noise).to(self.device)
         out = []
         offsets = np.asarray(offset_hours)
+        valid = np.asarray(valid_times)
+        gaps = np.diff(valid.astype("datetime64[s]").astype("int64")) / 3600.0
+        state, previous = shared, None
         for i in range(0, len(c0), batch):
             sl = slice(i, i + batch)
-            x, baseline = make_hourly_inputs(c0[sl], c1[sl], offsets[sl], np.asarray(valid_times)[sl],
-                                             self.static_norm, self.stats)
+            x, baseline = make_hourly_inputs(c0[sl], c1[sl], offsets[sl], valid[sl], self.static_norm, self.stats)
             x = torch.from_numpy(x).to(self.device)
-            batch_noise = None if shared is None else shared[None].expand(x.shape[0], *shared.shape).reshape(
-                x.shape[0] * n_members, *shared.shape[1:])
+            if shared is None:
+                batch_noise = None
+            elif noise_hours is None:
+                batch_noise = shared[None].expand(x.shape[0], *shared.shape).reshape(
+                    x.shape[0] * n_members, *shared.shape[1:])
+            else:
+                steps = []
+                for k in range(i, i + x.shape[0]):
+                    if previous is not None:
+                        gap = gaps[k - 1]
+                        rho = float(np.exp(-gap / noise_hours)) if gap > 0 else 0.0
+                        fresh = self.net._noise(n_members, height, width, self.device)
+                        state = rho * previous + float(np.sqrt(1.0 - rho ** 2)) * fresh
+                    steps.append(state)
+                    previous = state
+                batch_noise = torch.cat(steps, 0)
             pred = self.net(x, n_members, noise=batch_noise).cpu().numpy()
             out.append(to_kelvin(baseline, pred, self.stats).astype("f4"))
         return np.concatenate(out, 0)
@@ -363,7 +384,8 @@ def hourly_forecast(forecast: xr.DataArray) -> xr.DataArray:
 
 
 def downscale_hours(
-    model: HourlyDownscaler, forecast: xr.DataArray, leads: np.ndarray, samples: int, batch: int, seed: int = 0
+    model: HourlyDownscaler, forecast: xr.DataArray, leads: np.ndarray, samples: int, batch: int, seed: int = 0,
+    noise_hours: float | None = None,
 ) -> xr.Dataset:
     """Run the hourly model over every member of a 6-hourly forecast.
 
@@ -377,8 +399,11 @@ def downscale_hours(
     :type samples: int
     :param batch: Hours processed at once.
     :type batch: int
-    :param seed: Seed of the noise; member ``m`` uses ``seed + m`` at every hour.
+    :param seed: Seed of the noise; member ``m`` starts from ``seed + m``.
     :type seed: int
+    :param noise_hours: Correlation time [h] of the noise, see :meth:`HourlyDownscaler.predict_hours`; ``None``
+        keeps each member's noise fixed over the whole forecast.
+    :type noise_hours: float | None
     :returns: ``t2m_interp`` and ``t2m_ds`` laid out as :func:`downscale.inference.downscale_forecast` does.
     :rtype: xarray.Dataset
     :raises ValueError: If a lead time's window does not start on a forecast step.
@@ -410,7 +435,8 @@ def downscale_hours(
             c0, c1 = coarse[i, starts, member], coarse[i, ends, member]
             line[i, :, member] = temporal_interpolation(c0, c1, offsets)
             fine[i, :, member] = model.predict_hours(
-                c0, c1, offsets, valid[i], members=samples, batch=batch, seed=seed + member
+                c0, c1, offsets, valid[i], members=samples, batch=batch, seed=seed + member,
+                noise_hours=noise_hours,
             )
     import xarray as xr
 

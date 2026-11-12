@@ -172,6 +172,8 @@ class TemporalConfig:
     #: CERRA analysis times, and the forecast lead times [h] that fill the hours between them.
     analysis_times: list[str] = field(default_factory=lambda: list(CERRA_ANALYSIS_TIMES))
     forecast_leads: list[str] = field(default_factory=lambda: ["1", "2"])
+    #: Correlation time [h] of each member's noise at inference; ``None`` keeps it fixed for the whole forecast.
+    noise_hours: float | None = None
 
 
 @dataclass

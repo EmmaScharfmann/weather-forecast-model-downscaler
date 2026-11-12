@@ -54,3 +54,6 @@ temporal:
   # CERRA's analyses, and the forecast lead times [h] that fill the hours between them.
   analysis_times: ["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00"]
   forecast_leads: ["1", "2"]
+  # Correlation time [h] of each member's noise when downscaling: null keeps it fixed, a few hours lets the
+  # detail drift as an AR(1) process, which check_spectrum.py --hourly measures against CERRA.
+  noise_hours: null

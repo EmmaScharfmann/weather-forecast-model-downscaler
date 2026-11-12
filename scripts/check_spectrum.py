@@ -116,9 +116,55 @@ def validation_slice(pairs_dir: Path, val_years: Sequence[int], n_times: int, ho
     )
 
 
+def fair_crps(ensemble: np.ndarray, observed: np.ndarray) -> float:
+    """Mean fair CRPS of an ensemble.
+
+    :param ensemble: Members on axis 1, ``(n, members, ...)``.
+    :type ensemble: numpy.ndarray
+    :param observed: The truth, ``(n, ...)``.
+    :type observed: numpy.ndarray
+    :returns: The CRPS averaged over every point.
+    :rtype: float
+    """
+    m = ensemble.shape[1]
+    skill = np.abs(ensemble - observed[:, None]).mean(1)
+    spread = sum(np.abs(ensemble[:, i] - ensemble[:, j]) for i in range(m) for j in range(i + 1, m))
+    return float((skill - spread / (m * (m - 1))).mean())
+
+
+def hour_to_hour(target: np.ndarray, line: np.ndarray, spatial: np.ndarray, hourly: np.ndarray,
+                 land: np.ndarray) -> dict:
+    """How each way of filling the hours changes from one hour to the next, over land.
+
+    :param target: The target, ``(hours, y, x)``, at consecutive hours.
+    :type target: numpy.ndarray
+    :param line: The straight line, ``(hours, y, x)``.
+    :type line: numpy.ndarray
+    :param spatial: Spatial model members, ``(hours, members, y, x)``.
+    :type spatial: numpy.ndarray
+    :param hourly: Hourly model members, ``(hours, members, y, x)``.
+    :type hourly: numpy.ndarray
+    :param land: Land mask, ``(y, x)``.
+    :type land: numpy.ndarray
+    :returns: Mean absolute change per hour of one member [K/h], and the CRPS of the members' fields and of
+        their one-hour changes against the target's [K].
+    :rtype: dict
+    """
+    change = {name: np.diff(field[..., land], axis=0) for name, field in
+              {"target": target, "line": line, "spatial": spatial, "hourly": hourly}.items()}
+    one = {name: c if c.ndim == 2 else c[:, 0] for name, c in change.items()}
+    return {
+        "abs_change_K_per_h": {name: round(float(np.abs(c).mean()), 3) for name, c in one.items()},
+        "crps_K": {name: round(fair_crps(f[..., land], target[..., land]), 3)
+                   for name, f in {"spatial": spatial, "hourly": hourly}.items()},
+        "crps_1h_change_K": {name: round(fair_crps(change[name], change["target"]), 3)
+                             for name in ("spatial", "hourly")},
+    }
+
+
 def hourly_spectra(
     pairs_dir: Path, hourly_path: str, spatial_path: str, out: Path, val_start: str, val_end: str | None = None,
-    members: int = 4, device: str | None = None,
+    members: int = 4, device: str | None = None, noise_hours: float | None = None, seed: int = 0,
 ) -> int:
     """Power spectra of the hourly model, in space and in time, against the target.
 
@@ -138,6 +184,10 @@ def hourly_spectra(
     :type members: int
     :param device: Torch device; ``None`` picks one.
     :type device: str | None
+    :param noise_hours: Correlation time [h] of the hourly model's noise; ``None`` keeps it fixed.
+    :type noise_hours: float | None
+    :param seed: Seed of the hourly model's noise.
+    :type seed: int
     :returns: Exit status.
     :rtype: int
     :raises ValueError: If fewer than 24 consecutive validation hours are available.
@@ -168,7 +218,7 @@ def hourly_spectra(
 
     line = hr.temporal_interpolation(c0, c1, offsets)
     by_spatial = spatial.predict(line, valid, members=members)
-    by_hourly = hourly.predict_hours(c0, c1, offsets, valid, members=members, seed=0)
+    by_hourly = hourly.predict_hours(c0, c1, offsets, valid, members=members, seed=seed, noise_hours=noise_hours)
     sea = ~land
 
     def on_land(stack: np.ndarray) -> np.ndarray:
@@ -198,6 +248,8 @@ def hourly_spectra(
         "hours": len(hours),
         "start": str(pd.Timestamp(valid[0])),
         "members": members,
+        "noise_hours": noise_hours,
+        **hour_to_hour(target, line, by_spatial, by_hourly, land),
         "power_ratio_periods_up_to_4h": {
             name: round(float((in_time[name][short] / in_time["target"][short]).mean()), 3) for name in HOURLY_LABELS[1:]
         },
@@ -233,6 +285,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--hour", type=int, default=12, help="UTC hour to sample; -1 uses every hour")
     parser.add_argument("--members", type=int, default=None, help="8, or 4 with --hourly")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--noise-hours", type=float, default=None,
+                        help="with --hourly, correlation time [h] of the noise; overrides temporal.noise_hours")
     parser.add_argument("--device", default=None)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
@@ -245,7 +299,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error("--hourly needs --val-start or temporal.val_start")
         out = Path(args.out) if args.out else Path(args.hourly).parent
         return hourly_spectra(pairs_dir, args.hourly, args.model, out, val_start,
-                              args.val_end or cfg.temporal.val_end, args.members or 4, args.device)
+                              args.val_end or cfg.temporal.val_end, args.members or 4, args.device,
+                              args.noise_hours if args.noise_hours is not None else cfg.temporal.noise_hours, args.seed)
     args.members = args.members or 8
     out = Path(args.out) if args.out else Path(args.model).parent
     out.mkdir(parents=True, exist_ok=True)
