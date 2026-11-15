@@ -631,3 +631,28 @@ reports to `outputs/precipitation_year/`, and renders a 24-hour MP4. It does not
 use test scores for checkpoint selection. These remain PARDIG agreement scores
 with ERA5 as a forcing proxy; completing this run does not establish operational
 forecast skill or independent radar/gauge skill.
+
+### A movie from a real global forecast
+
+The rainfall checkpoint can also be driven by one operational AIFS single run:
+
+```sh
+.venv/bin/python scripts/precipitation_live.py \
+  --init 2026-11-15T06:00 --hours 96 --first-hour 2026-11-15T15:00 \
+  --out outputs/precipitation_live/20261115T0600
+```
+
+The script reads only the six required surface-field GRIB byte ranges every six
+hours, caches them, verifies initialization, units and accumulation semantics,
+and converts cumulative precipitation into six-hour depths. AIFS may encode
+water-equivalent precipitation in kg/m² (mm), whereas the conversion schema uses
+metres. Small decreases bounded by the messages' GRIB packing errors are corrected
+with a monotone cumulative envelope; larger decreases are rejected. Input and
+checkpoint fingerprints prevent reuse of another run's cached predictions.
+
+The resulting MP4 shows the global forcing, one downscaled sample, the conditional
+ensemble mean, and probability of at least 1 mm during the displayed hour. There
+is no future-observation/reference panel. The eight samples share one global
+forecast: they describe conditional downscaler uncertainty. ERA5-to-AIFS transfer
+skill and total operational forecast uncertainty have not been validated.
+ECMWF open data attribution and forecast initialization appear in the movie.
