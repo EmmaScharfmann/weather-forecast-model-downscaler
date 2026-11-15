@@ -47,3 +47,25 @@ def test_quantized_accumulation_uses_monotone_envelope_without_extra_water():
     assert result.attrs['max_cumulative_quantization_correction_mm']==pytest.approx(.05,abs=1e-6)
     with pytest.raises(ValueError,match='resets'):
         interval_fields(fields,np.array([.000001]*3))
+
+
+def test_ensemble_growth_preserves_first_eight_and_reports_sample_variance(monkeypatch):
+    import scripts.precipitation_live as live
+    calls=[]
+    def fake_predict(checkpoint,forcing,device,members,noise_seed):
+        calls.append((members,noise_seed))
+        values=np.arange(members,dtype='float32')+noise_seed*10
+        return xr.Dataset({'precipitation':(('time','sample','lat','lon'),values[None,:,None,None])},coords={'sample':np.arange(members)})
+    monkeypatch.setattr(live,'predict',fake_predict)
+    a=live.conditional_ensemble('cp',None,8,device='cpu')
+    b=live.conditional_ensemble('cp',None,32,device='cpu')
+    xr.testing.assert_equal(a.precipitation,b.precipitation.isel(sample=slice(0,8)))
+    assert calls[-4:]==[(8,2),(8,3),(8,4),(8,5)]
+    partial=live.conditional_ensemble('cp',None,10,device='cpu')
+    xr.testing.assert_equal(partial.precipitation,b.precipitation.isel(sample=slice(0,10)))
+    mean,variance,prob=live.ensemble_statistics(b.precipitation.values)
+    np.testing.assert_allclose(mean,b.precipitation.values.mean(1))
+    np.testing.assert_allclose(variance,b.precipitation.values.var(1,ddof=1))
+    assert np.all(prob==1)
+    with pytest.raises(ValueError,match='two samples'):
+        live.ensemble_statistics(np.ones((1,1,2,2)))

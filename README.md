@@ -650,9 +650,23 @@ metres. Small decreases bounded by the messages' GRIB packing errors are correct
 with a monotone cumulative envelope; larger decreases are rejected. Input and
 checkpoint fingerprints prevent reuse of another run's cached predictions.
 
-The resulting MP4 shows the global forcing, one downscaled sample, the conditional
-ensemble mean, and probability of at least 1 mm during the displayed hour. There
-is no future-observation/reference panel. The eight samples share one global
+The resulting MP4 shows the global forcing, the conditional ensemble mean, sample variance
+(in mm², with `ddof=1`), and probability of at least 1 mm during the displayed hour. There
+is no future-observation/reference panel. The samples share one global
 forecast: they describe conditional downscaler uncertainty. ERA5-to-AIFS transfer
 skill and total operational forecast uncertainty have not been validated.
 ECMWF open data attribution and forecast initialization appear in the movie.
+
+To increase the noise ensemble while reusing the same downloaded global forecast:
+
+```sh
+.venv/bin/python scripts/precipitation_live.py \
+  --init 2026-11-15T06:00 --hours 96 --first-hour 2026-11-15T15:00 \
+  --members 32 --reuse-inputs outputs/precipitation_live/20261115T0600 \
+  --out outputs/precipitation_live/20261115T0600_32
+```
+
+Sampling uses reproducible groups of eight with independent group seeds, preserving
+earlier samples when the ensemble grows. Larger ensembles stabilize Monte Carlo
+estimates; sample variance measures conditional rainfall spread and is not the
+variance of the estimated mean. All members retain the checkpoint's terrain.

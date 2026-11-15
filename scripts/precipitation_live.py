@@ -124,6 +124,29 @@ def interval_fields(fields, packing_error_m=None):
     return result
 
 
+def conditional_ensemble(checkpoint, forcing, members=8, device=None):
+    """Stable groups of eight: expanding an ensemble preserves earlier samples."""
+    if members < 2:
+        raise ValueError('at least two samples required for sample variance')
+    blocks=[]
+    for start in range(0,members,8):
+        size=min(8,members-start)
+        block=predict(checkpoint,forcing,device=device or default_device(),members=8,noise_seed=2+start//8)
+        block=block.isel(sample=slice(0,size))
+        blocks.append(block)
+        print(f'generated {start+size}/{members} conditional samples',flush=True)
+    result=xr.concat(blocks,dim='sample').assign_coords(sample=np.arange(members))
+    result.attrs.update(noise_sampling='groups of up to 8; group seeds 2,3,...',conditional_samples=members)
+    return result
+
+
+def ensemble_statistics(rain):
+    """Variance of hourly depth in mm², distinct from variance of its sample mean."""
+    if rain.shape[1]<2:
+        raise ValueError('at least two samples required for sample variance')
+    return rain.mean(1),rain.var(1,ddof=1),(rain>=1).mean(1)
+
+
 def make_forecast_movie(forcing, prediction, path, init, model, first_hour=None, fps=3):
     import matplotlib
     matplotlib.use('Agg')
@@ -145,26 +168,35 @@ def make_forecast_movie(forcing, prediction, path, init, model, first_hour=None,
         raise ValueError('movie needs consecutive hourly predictions')
     rain = prediction.precipitation.values
     coarse = forcing.predictors.sel(variable='tp').values
-    fields = [coarse, rain[:,0], rain.mean(1), (rain >= 1).mean(1)]
-    titles = ['Global forcing\nSix-hour rainfall / 6', 'Downscaled sample 1\nTerrain + joint temporal decoding',
-              f'Downscaled mean\n{rain.shape[1]} conditional samples', 'Probability of ≥1 mm in this hour\nConditional on this global run']
+    mean,variance,probability=ensemble_statistics(rain)
+    fields = [coarse,mean,variance,probability]
+    titles = ['Global forcing\nSix-hour rainfall / 6',f'Downscaled mean\n{rain.shape[1]} terrain-conditioned samples',
+              'Conditional sample variance\nSpread of hourly rainfall (mm²)', 'Probability of ≥1 mm in this hour\nConditional on this global run']
     palette = ['#ffffff','#c9e9f6','#80c6e3','#3596c5','#2268a7','#33428c','#7950a0','#c65887','#e6874a']
     cmap = ListedColormap(palette)
     norm = BoundaryNorm([0,.1,.5,1,2,5,10,20,40,100],cmap.N)
     fig = plt.figure(figsize=(15,6.8),facecolor='#f8fafc')
-    grid = fig.add_gridspec(2,4,height_ratios=[3,1.1],left=.055,right=.905,bottom=.15,top=.79,wspace=.12,hspace=.28)
+    grid = fig.add_gridspec(2,4,height_ratios=[3,1.1],left=.055,right=.97,bottom=.15,top=.79,wspace=.12,hspace=.28)
     meshes=[]
     for i,(field,title) in enumerate(zip(fields,titles)):
         ax=fig.add_subplot(grid[0,i],projection=ccrs.PlateCarree())
         ax.set_extent([float(forcing.lon.min()),float(forcing.lon.max()),float(forcing.lat.min()),float(forcing.lat.max())])
         mesh=ax.pcolormesh(forcing.lon,forcing.lat,field[0],shading='auto',transform=ccrs.PlateCarree(),
-                           **({'cmap':cmap,'norm':norm} if i<3 else {'cmap':'YlGnBu','vmin':0,'vmax':1}))
+                           **({'cmap':cmap,'norm':norm} if i<2 else
+                              {'cmap':'YlOrRd','vmin':0,'vmax':10} if i==2 else
+                              {'cmap':'YlGnBu','vmin':0,'vmax':1}))
         ax.coastlines('50m',linewidth=.45,color='#56616e')
         ax.add_feature(cfeature.BORDERS.with_scale('50m'),linewidth=.35,edgecolor='#7a8490')
         ax.set_title(title,fontsize=9,loc='left',pad=9)
         meshes.append(mesh)
-    bar=fig.add_axes([.918,.44,.009,.25]);fig.colorbar(meshes[0],cax=bar,ticks=[.1,1,5,10,20,40]);bar.set_title('mm / hour',fontsize=8,pad=8);bar.tick_params(labelsize=8)
-    bar=fig.add_axes([.962,.44,.009,.25]);fig.colorbar(meshes[3],cax=bar,ticks=[0,.5,1]);bar.set_title('P',fontsize=8,pad=8);bar.tick_params(labelsize=8)
+    for mesh,position,label,ticks in [
+            (meshes[0],[.055,.385,.43,.012],'Hourly rainfall (mm)',[.1,1,5,10,20,40]),
+            (meshes[2],[.535,.385,.19,.012],'Sample variance (mm²)',[0,2,5,10]),
+            (meshes[3],[.78,.385,.19,.012],'Probability',[0,.5,1])]:
+        bar=fig.add_axes(position)
+        cb=fig.colorbar(mesh,cax=bar,orientation='horizontal',ticks=ticks,extend='max' if mesh is meshes[2] else 'neither')
+        cb.set_label(label,fontsize=8,labelpad=1)
+        bar.tick_params(labelsize=7,pad=1)
     ax=fig.add_subplot(grid[1,:]);regional=rain.mean((-2,-1))
     ax.plot(times,coarse.mean((-2,-1)),color='#82909f',label='Global six-hour mean')
     ax.plot(times,regional.mean(1),color='#176dba',label='Downscaled mean')
@@ -198,31 +230,37 @@ def main():
     parser.add_argument('--model',default='aifs-single',choices=['aifs-single','ifs'])
     parser.add_argument('--checkpoint',default='runs/precipitation_year/model.pt')
     parser.add_argument('--out',required=True)
+    parser.add_argument('--members',type=int,default=8,help='conditional noise samples; stable groups of eight')
+    parser.add_argument('--reuse-inputs',help='reuse global_fields.zarr and grib/ from another output directory')
     parser.add_argument('--first-hour',help='optional first displayed hour end in UTC')
     args=parser.parse_args()
+    if args.members<2:parser.error('members must be at least two')
     if args.hours<6 or args.hours%6:parser.error('hours must be a positive multiple of six')
     init=pd.Timestamp(args.init)
     if init.tz is not None or init != init.floor('6h'):
         parser.error('initialization must be a naive UTC timestamp on a six-hour boundary')
     out=Path(args.out);out.mkdir(parents=True,exist_ok=True)
     manifest=dict(initialization=str(init),hours=args.hours,model=args.model,
-                  checkpoint_sha256=hashlib.sha256(Path(args.checkpoint).read_bytes()).hexdigest(),samples=8,noise_seed=2)
+                  checkpoint_sha256=hashlib.sha256(Path(args.checkpoint).read_bytes()).hexdigest(),samples=args.members,noise_seed=2)
     manifest_path=out/'inputs.json'
     if manifest_path.exists() and json.loads(manifest_path.read_text()) != manifest:
         raise ValueError('output cache belongs to another forecast or checkpoint; choose another --out')
     manifest_path.write_text(json.dumps(manifest,indent=2)+'\n')
-    fields_path=out/'global_fields.zarr'
+    inputs=Path(args.reuse_inputs) if args.reuse_inputs else out
+    fields_path=inputs/'global_fields.zarr'
     if not fields_path.exists():
-        fields=fetch_fields(args.init,args.hours,out/'grib',args.model)
+        fields=fetch_fields(args.init,args.hours,inputs/'grib',args.model)
         write_pack(fields.to_dataset(),fields_path)
     else:fields=xr.open_zarr(fields_path).fields.load()
+    if fields.attrs.get('source')!=f'ECMWF {args.model} open data':
+        raise ValueError('cached forcing comes from another global model')
     cp=torch.load(args.checkpoint,map_location='cpu',weights_only=True)
     if fields.time.values != np.datetime64(args.init,'ns') or fields.sizes['lead_time'] != args.hours//6:
         raise ValueError('existing forecast cache differs from requested run/horizon')
     import eccodes
     packing_error=[]
     for lead in fields.lead_time.values / np.timedelta64(1,'h'):
-        h=eccodes.codes_new_from_message((out/'grib'/f'{int(lead):03d}_tp.grib2').read_bytes())
+        h=eccodes.codes_new_from_message((inputs/'grib'/f'{int(lead):03d}_tp.grib2').read_bytes())
         try:
             error=float(eccodes.codes_get(h,'packingError'))
             if eccodes.codes_get(h,'units')=='kg m**-2': error/=1000
@@ -234,7 +272,7 @@ def main():
                          max_cumulative_quantization_correction_mm=intervals.attrs['max_cumulative_quantization_correction_mm'])
     if not (out/'forcing.zarr').exists():write_pack(forcing,out/'forcing.zarr')
     if not (out/'predictions.zarr').exists():
-        prediction=predict(args.checkpoint,forcing,device=default_device(),members=8,noise_seed=2)
+        prediction=conditional_ensemble(args.checkpoint,forcing,members=args.members)
         prediction.attrs.update(global_model=args.model,forecast_init=args.init,uncertainty='conditional on one deterministic global forecast')
         write_pack(prediction,out/'predictions.zarr')
     else:prediction=xr.open_zarr(out/'predictions.zarr').load()
@@ -244,7 +282,7 @@ def main():
     make_forecast_movie(forcing,prediction,movie,args.init,args.model,args.first_hour)
     report=dict(initialization=args.init,global_model=args.model,horizon_hours=args.hours,first_displayed_hour=args.first_hour,
                 checkpoint=args.checkpoint,checkpoint_sha256=hashlib.sha256(Path(args.checkpoint).read_bytes()).hexdigest(),
-                terrain=cp['config']['terrain'],conditional_samples=8,grid_degrees=.1,
+                terrain=cp['config']['terrain'],conditional_samples=args.members,grid_degrees=.1,
                 max_cumulative_quantization_correction_mm=intervals.attrs['max_cumulative_quantization_correction_mm'],
                 forecast_max_sample_mm=float(prediction.precipitation.max()),movie=str(movie),
                 caveat='ERA5-trained downscaler driven by operational AIFS; skill of this transfer not independently verified')
