@@ -15,6 +15,7 @@ reproduces the spatial model exactly and training only has to add the hours in b
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -332,42 +333,56 @@ class HourlyDownscaler(Downscaler):
         :rtype: numpy.ndarray
         """
         n_members = members if self.net.cfg.stochastic else 1
-        height, width = c0.shape[1:]
-        shared = None
-        if self.net.cfg.stochastic:
-            if noise is None:
-                torch.manual_seed(seed)
-                shared = self.net._noise(n_members, height, width, self.device)
-            else:
-                shared = torch.from_numpy(noise).to(self.device)
+        offsets, valid = np.asarray(offset_hours), np.asarray(valid_times)
+        noises = self.hour_noise(valid, n_members, c0.shape[1:], noise, seed, noise_hours)
         out = []
-        offsets = np.asarray(offset_hours)
-        valid = np.asarray(valid_times)
-        gaps = np.diff(valid.astype("datetime64[s]").astype("int64")) / 3600.0
-        state, previous = shared, None
         for i in range(0, len(c0), batch):
             sl = slice(i, i + batch)
             x, baseline = make_hourly_inputs(c0[sl], c1[sl], offsets[sl], valid[sl], self.static_norm, self.stats)
             x = torch.from_numpy(x).to(self.device)
-            if shared is None:
-                batch_noise = None
-            elif noise_hours is None:
-                batch_noise = shared[None].expand(x.shape[0], *shared.shape).reshape(
-                    x.shape[0] * n_members, *shared.shape[1:])
-            else:
-                steps = []
-                for k in range(i, i + x.shape[0]):
-                    if previous is not None:
-                        gap = gaps[k - 1]
-                        rho = float(np.exp(-gap / noise_hours)) if gap > 0 else 0.0
-                        fresh = self.net._noise(n_members, height, width, self.device)
-                        state = rho * previous + float(np.sqrt(1.0 - rho ** 2)) * fresh
-                    steps.append(state)
-                    previous = state
-                batch_noise = torch.cat(steps, 0)
+            batch_noise = None if noises is None else torch.cat([next(noises) for _ in range(len(x))])
             pred = self.net(x, n_members, noise=batch_noise).cpu().numpy()
             out.append(to_kelvin(baseline, pred, self.stats).astype("f4"))
         return np.concatenate(out, 0)
+
+    def hour_noise(self, valid_times: np.ndarray, members: int, shape: tuple[int, int],
+                   noise: np.ndarray | None = None, seed: int = 0,
+                   noise_hours: float | None = None) -> Iterator[torch.Tensor] | None:
+        """The noise of every member at each of the given hours.
+
+        :param valid_times: The hours, in order.
+        :type valid_times: numpy.ndarray
+        :param members: Members to draw noise for.
+        :type members: int
+        :param shape: Grid ``(y, x)``.
+        :type shape: tuple[int, int]
+        :param noise: Noise of the first hour, ``(members, noise_channels, y, x)``; ``None`` draws it from ``seed``.
+        :type noise: numpy.ndarray | None
+        :param seed: Seed of the noise.
+        :type seed: int
+        :param noise_hours: Correlation time [h]: ``None`` repeats the first hour's noise, otherwise it drifts as an
+            AR(1) process with ``rho = exp(-gap / noise_hours)``; a gap that is not positive starts afresh.
+        :type noise_hours: float | None
+        :returns: One ``(members, noise_channels, y, x)`` tensor per hour, or ``None`` for a deterministic model.
+        :rtype: collections.abc.Iterator[torch.Tensor] | None
+        """
+        if not self.net.cfg.stochastic:
+            return None
+        torch.manual_seed(seed)
+        draw = lambda: self.net._noise(members, *shape, self.device)  # noqa: E731
+        state = draw() if noise is None else torch.from_numpy(noise).to(self.device)
+        gaps = np.diff(np.asarray(valid_times).astype("datetime64[s]").astype("int64")) / 3600.0
+
+        def hours() -> Iterator[torch.Tensor]:
+            nonlocal state
+            yield state
+            for gap in gaps:
+                if noise_hours is not None:
+                    rho = float(np.exp(-gap / noise_hours)) if gap > 0 else 0.0
+                    state = rho * state + float(np.sqrt(1.0 - rho ** 2)) * draw()
+                yield state
+
+        return hours()
 
 
 def hourly_forecast(forecast: xr.DataArray) -> xr.DataArray:

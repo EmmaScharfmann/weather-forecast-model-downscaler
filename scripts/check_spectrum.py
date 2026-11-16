@@ -45,6 +45,7 @@ from typing import Sequence
 
 import numpy as np
 import pandas as pd
+import torch
 import xarray as xr
 
 from downscale import hourly as hr
@@ -59,7 +60,7 @@ from downscale.diagnostics import (
     spectrum_figure,
     temporal_spectrum,
 )
-from downscale.downscaler import Downscaler
+from downscale.downscaler import Downscaler, fair_crps
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from train_downscaler import open_pairs  # noqa: E402
@@ -116,22 +117,6 @@ def validation_slice(pairs_dir: Path, val_years: Sequence[int], n_times: int, ho
     )
 
 
-def fair_crps(ensemble: np.ndarray, observed: np.ndarray) -> float:
-    """Mean fair CRPS of an ensemble.
-
-    :param ensemble: Members on axis 1, ``(n, members, ...)``.
-    :type ensemble: numpy.ndarray
-    :param observed: The truth, ``(n, ...)``.
-    :type observed: numpy.ndarray
-    :returns: The CRPS averaged over every point.
-    :rtype: float
-    """
-    m = ensemble.shape[1]
-    skill = np.abs(ensemble - observed[:, None]).mean(1)
-    spread = sum(np.abs(ensemble[:, i] - ensemble[:, j]) for i in range(m) for j in range(i + 1, m))
-    return float((skill - spread / (m * (m - 1))).mean())
-
-
 def hour_to_hour(target: np.ndarray, line: np.ndarray, spatial: np.ndarray, hourly: np.ndarray,
                  land: np.ndarray) -> dict:
     """How each way of filling the hours changes from one hour to the next, over land.
@@ -150,15 +135,16 @@ def hour_to_hour(target: np.ndarray, line: np.ndarray, spatial: np.ndarray, hour
         their one-hour changes against the target's [K].
     :rtype: dict
     """
-    change = {name: np.diff(field[..., land], axis=0) for name, field in
+    def crps(ensemble: np.ndarray, truth: np.ndarray) -> float:
+        return round(float(fair_crps(torch.from_numpy(ensemble[..., land]), torch.from_numpy(truth[..., land]))), 3)
+
+    change = {name: np.diff(field, axis=0) for name, field in
               {"target": target, "line": line, "spatial": spatial, "hourly": hourly}.items()}
-    one = {name: c if c.ndim == 2 else c[:, 0] for name, c in change.items()}
+    one = {name: c if c.ndim == 3 else c[:, 0] for name, c in change.items()}
     return {
-        "abs_change_K_per_h": {name: round(float(np.abs(c).mean()), 3) for name, c in one.items()},
-        "crps_K": {name: round(fair_crps(f[..., land], target[..., land]), 3)
-                   for name, f in {"spatial": spatial, "hourly": hourly}.items()},
-        "crps_1h_change_K": {name: round(fair_crps(change[name], change["target"]), 3)
-                             for name in ("spatial", "hourly")},
+        "abs_change_K_per_h": {name: round(float(np.abs(c[:, land]).mean()), 3) for name, c in one.items()},
+        "crps_K": {"spatial": crps(spatial, target), "hourly": crps(hourly, target)},
+        "crps_1h_change_K": {name: crps(change[name], change["target"]) for name in ("spatial", "hourly")},
     }
 
 
