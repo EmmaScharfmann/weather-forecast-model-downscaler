@@ -64,7 +64,8 @@ def write(ds: xr.Dataset, target: Path, done: bool = False) -> Path:
     return target
 
 
-def run_one(forecast_path: Path, hourly, spatial, out: Path, variable: str, samples: int, batch: int) -> None:
+def run_one(forecast_path: Path, hourly, spatial, out: Path, variable: str, samples: int, batch: int,
+            noise_hours: float | None = None) -> None:
     """Write the three hourly stores for one forecast.
 
     :param forecast_path: 6-hourly forecast store.
@@ -81,6 +82,8 @@ def run_one(forecast_path: Path, hourly, spatial, out: Path, variable: str, samp
     :type samples: int
     :param batch: Hours processed at once.
     :type batch: int
+    :param noise_hours: Correlation time [h] of the noise; ``None`` keeps it fixed.
+    :type noise_hours: float | None
     :returns: ``None``
     :rtype: None
     """
@@ -93,7 +96,7 @@ def run_one(forecast_path: Path, hourly, spatial, out: Path, variable: str, samp
     name = Path(forecast_path).name
     write(coarse_hourly.to_dataset(name=variable), out / "forecasts" / name, done=True)
     leads = coarse_hourly["lead_time"].values
-    write(hr.downscale_hours(hourly, forecast, leads, samples, batch), out / "hourly" / name)
+    write(hr.downscale_hours(hourly, forecast, leads, samples, batch, noise_hours=noise_hours), out / "hourly" / name)
     write(downscale_forecast(spatial, coarse_hourly, samples, batch), out / "spatial" / name)
     logger.info("%s: %d hourly lead times in %.0fs", name, len(leads), time.time() - started)
 
@@ -114,6 +117,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out", default="outputs/hourly")
     parser.add_argument("--samples", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--noise-hours", type=float, default=None,
+                        help="correlation time [h] of the noise; overrides temporal.noise_hours")
     parser.add_argument("--device", default=None)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
@@ -132,7 +137,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     samples = args.samples or cfg.inference.samples
     batch = args.batch_size or cfg.inference.batch_size
     for path in forecasts:
-        run_one(Path(path), hourly, spatial, Path(args.out), cfg.coarse.variable, samples, batch)
+        run_one(Path(path), hourly, spatial, Path(args.out), cfg.coarse.variable, samples, batch,
+                args.noise_hours if args.noise_hours is not None else cfg.temporal.noise_hours)
     print(f"\n{len(forecasts)} forecast(s) written to {args.out}/{{forecasts,hourly,spatial}}")
     return 0
 

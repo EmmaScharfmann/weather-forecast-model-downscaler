@@ -89,6 +89,23 @@ def test_a_member_keeps_its_noise_from_hour_to_hour(static_fields, hourly_stats)
     assert not np.allclose(fine[0, 0], fine[0, 1])  # members differ from each other
 
 
+def test_noise_can_drift_from_hour_to_hour(static_fields, hourly_stats):
+    height, width = static_fields["lat"].shape
+    model = hourly_model(static_fields, hourly_stats, loss="crps")
+    with torch.no_grad():
+        for parameter in model.net.unet.out.parameters():
+            parameter.normal_(0, 0.1)
+    c0, c1 = np.full((4, height, width), 288.0, "f4"), np.full((4, height, width), 288.0, "f4")
+    times = np.arange(np.datetime64("2020-07-01T00"), np.datetime64("2020-07-01T04"), np.timedelta64(1, "h"))
+    offsets = np.arange(4)
+    frozen = model.predict_hours(c0, c1, offsets, times, members=2, seed=1)
+    slow = model.predict_hours(c0, c1, offsets, times, members=2, seed=1, noise_hours=1e9, batch=3)
+    fast = model.predict_hours(c0, c1, offsets, times, members=2, seed=1, noise_hours=1e-3, batch=3)
+    assert np.allclose(slow, frozen, atol=1e-4)  # a very long correlation time is the frozen noise
+    assert np.allclose(fast[0], frozen[0])  # the first hour starts from the same draw
+    assert not np.allclose(fast[1:], frozen[1:])  # a short one redraws it
+
+
 def test_checkpoint_round_trip_and_the_spatial_checkpoint_is_refused(tmp_path, static_fields, hourly_stats):
     height, width = static_fields["lat"].shape
     model = hourly_model(static_fields, hourly_stats)
