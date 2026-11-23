@@ -33,3 +33,28 @@ def test_listed_days_cannot_overlap_training(tmp_path):
     (tmp_path / "val.json").write_text(json.dumps({"days": ["2019-06-01"]}))
     with pytest.raises(ValueError, match="overlap"):
         periods(config(tmp_path, validation_days=str(tmp_path / "val.json")))
+
+
+def test_feature_stack_matches_features_and_saves_memory():
+    import numpy as np
+    import xarray as xr
+    from downscale.precipitation import FeatureStack, features
+    rng = np.random.default_rng(0)
+    n, h, w = 30, 6, 7
+    predictors = rng.normal(0, 1, (n, 3, h, w)).astype("float32")
+    predictors[:, 0] = rng.gamma(0.5, 1, (n, h, w))
+    ds = xr.Dataset({"predictors": (("time", "variable", "lat", "lon"), predictors)},
+                    coords={"time": pd.date_range("2019-01-01T01:00", periods=n, freq="h"),
+                            "variable": ["tp", "t2m", "msl"], "lat": np.linspace(44, 45, h), "lon": np.linspace(2, 3, w)})
+    static = rng.normal(0, 1, (8, h, w)).astype("float32")
+    reference, mean, std = features(ds, static=static)
+    stats = FeatureStack.statistics(ds, block=7)
+    assert np.allclose(stats[0], mean, atol=1e-5) and np.allclose(stats[1], std, atol=1e-4)
+    stack = FeatureStack(ds, mean, std, static, block=7)
+    index = np.array([3, 4, 5, 20])
+    assert stack.shape == reference.shape and len(stack) == n
+    assert np.allclose(stack[index], reference[index], atol=1e-6)
+    assert np.allclose(stack[2:9], reference[2:9], atol=1e-6)
+    half = FeatureStack(ds, mean, std, static, "float16")
+    assert half.data.nbytes * 2 == stack.data.nbytes
+    assert np.allclose(half[index], reference[index], atol=5e-3)

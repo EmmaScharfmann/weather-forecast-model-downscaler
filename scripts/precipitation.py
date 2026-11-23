@@ -63,10 +63,22 @@ def train(ds, cfg, out, device):
         for coord in ("lat", "lon"):
             if not np.array_equal(ds[coord], initial[coord].numpy()):
                 raise ValueError(f"initial checkpoint {coord} differs")
-        x_train, mean, std = features(ds.isel(time=training), initial["mean"].numpy(), initial["std"].numpy(), model_cfg.temporal_context, static)
+    if model_cfg.temporal_context:
+        if initial is not None:
+            x_train, mean, std = features(ds.isel(time=training), initial["mean"].numpy(), initial["std"].numpy(), True, static)
+        else:
+            x_train, mean, std = features(ds.isel(time=training), temporal_context=True, static=static)
+        x_val, _, _ = features(ds.isel(time=validation), mean, std, True, static)
     else:
-        x_train, mean, std = features(ds.isel(time=training), temporal_context=model_cfg.temporal_context, static=static)
-    x_val, _, _ = features(ds.isel(time=validation), mean, std, model_cfg.temporal_context, static)
+        # Store only normalised predictors; other channels are added per batch.
+        from downscale.precipitation import FeatureStack
+        if initial is not None:
+            mean, std = initial["mean"].numpy(), initial["std"].numpy()
+        else:
+            mean, std = FeatureStack.statistics(ds.isel(time=training))
+        dtype = settings.get("feature_dtype", "float32")
+        x_train = FeatureStack(ds.isel(time=training), mean, std, static, dtype)
+        x_val = FeatureStack(ds.isel(time=validation), mean, std, static, dtype)
     ds = ds.copy(deep=False)
     ds.attrs = {**ds.attrs, "training_start": str(ds.time.values[training[0]]),
                 "training_end": str(ds.time.values[training[-1]]),
@@ -87,7 +99,7 @@ def train(ds, cfg, out, device):
     # Opt-in pairing preserves legacy seed behaviour for earlier experiments.
     if settings.get("paired_noise", False):
         torch.manual_seed(settings["seed"])
-    baseline = ds.predictors.values[:, 0].astype("float32")
+    baseline = ds.predictors.isel(variable=0).values.astype("float32")
     coherent = model_cfg.temporal_context or model_cfg.architecture == "joint"
     if coherent:
         from downscale.rain_temporal import hourly_baseline, trajectory_noise
@@ -299,7 +311,8 @@ def main():
             cfg["training"]["max_steps"] = args.max_steps
         if args.validation_start:
             cfg["validation_start"] = args.validation_start
-        train(xr.open_zarr(args.pairs).load(), cfg, args.out, args.device)
+        # Opened lazily: training reads the pack in blocks instead of loading it whole.
+        train(xr.open_zarr(args.pairs), cfg, args.out, args.device)
     elif args.command == "forcing":
         checkpoint = torch.load(args.model, map_location="cpu", weights_only=True)
         fields = crop(xr.open_zarr(args.forecast).fields, tuple(cfg["region"]))

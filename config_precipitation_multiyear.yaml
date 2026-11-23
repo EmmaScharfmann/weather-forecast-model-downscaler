@@ -31,6 +31,7 @@ training:
   sequence_windows: 2
   temporal_weight: 0.15
   mean_loss_weight: 0.0  # an MSE on the ensemble mean rewards blurry members
+  feature_dtype: float16  # halves input memory; ample precision for standardised inputs
   learning_rate: 5.0e-05
   seed: 0
   paired_noise: true

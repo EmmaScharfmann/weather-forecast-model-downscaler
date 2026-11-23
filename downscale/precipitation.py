@@ -41,12 +41,70 @@ def check_pack(ds: xr.Dataset, target=True):
     for coord in ("lat", "lon"):
         if ds.sizes[coord] < 2 or not np.all(np.diff(ds[coord].values) > 0):
             raise ValueError(f"{coord} must be strictly increasing with at least two cells")
-    if not np.isfinite(ds.predictors.values).all():
+    # xarray reductions run chunk by chunk on lazily opened packs.
+    if not bool(np.isfinite(ds.predictors).all()):
         raise ValueError("predictors contain missing/nonfinite values")
-    if np.any(ds.predictors.sel(variable="tp").values < 0):
+    if bool((ds.predictors.sel(variable="tp") < 0).any()):
         raise ValueError("rainfall predictors must be nonnegative")
-    if target and (not np.isfinite(ds.target.values).all() or np.any(ds.target.values < 0)):
+    if target and (not bool(np.isfinite(ds.target).all()) or bool((ds.target < 0).any())):
         raise ValueError("rainfall targets must be finite and nonnegative")
+
+
+class FeatureStack:
+    """The array ``features`` returns, built per batch to save memory.
+
+    Only the normalised predictors are stored (optionally as float16, ample for
+    standardised inputs); coordinates, calendar and terrain channels are
+    appended when indexed. The pack is read in blocks of ``block`` hours, so a
+    lazily opened Zarr pack is never loaded whole. Indexing returns float32.
+    """
+
+    def __init__(self, ds, mean, std, static=None, dtype="float32", block=744):
+        n, _, h, w = ds.predictors.shape
+        self.data = np.empty(ds.predictors.shape, dtype=dtype)
+        for start in range(0, n, block):
+            part = ds.predictors.isel(time=slice(start, start + block)).values.astype("float32")
+            part[:, 0] = np.log1p(part[:, 0])
+            self.data[start:start + block] = (part - mean) / std
+        lat, lon = np.meshgrid(ds.lat.values, ds.lon.values, indexing="ij")
+        self.geo = np.stack([lat / 90, lon / 180]).astype("float32")
+        self.calendar = time_features(ds.time.values).astype("float32")
+        if static is not None:
+            from .rain_terrain import CHANNELS
+            static = np.asarray(static, dtype="float32")
+            if static.shape != (len(CHANNELS), h, w) or not np.isfinite(static).all():
+                raise ValueError("static terrain must have the expected channels on the rainfall grid")
+        self.static = static
+        channels = self.data.shape[1] + 2 + self.calendar.shape[1] + (0 if static is None else len(static))
+        self.shape = (n, channels, h, w)
+
+    @staticmethod
+    def statistics(ds, block=744):
+        """Training mean and std of the predictors (tp as log1p), read in blocks."""
+        total = squares = 0.0
+        count = 0
+        for start in range(0, ds.sizes["time"], block):
+            part = ds.predictors.isel(time=slice(start, start + block)).values.astype("float64")
+            part[:, 0] = np.log1p(part[:, 0])
+            total = total + part.sum((0, 2, 3))
+            squares = squares + (part ** 2).sum((0, 2, 3))
+            count += part.shape[0] * part.shape[2] * part.shape[3]
+        mean = total / count
+        std = np.sqrt(np.maximum(squares / count - mean ** 2, 0))
+        return (mean.reshape(1, -1, 1, 1).astype("float32"),
+                np.maximum(std, 1e-4).reshape(1, -1, 1, 1).astype("float32"))
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __getitem__(self, index):
+        data = self.data[index].astype("float32")
+        n, _, h, w = data.shape
+        arrays = [data, np.broadcast_to(self.geo[None], (n, *self.geo.shape)),
+                  np.broadcast_to(self.calendar[index][:, :, None, None], (n, self.calendar.shape[1], h, w))]
+        if self.static is not None:
+            arrays.append(np.broadcast_to(self.static[None], (n, *self.static.shape)))
+        return np.concatenate(arrays, 1)
 
 
 def features(ds: xr.Dataset, mean=None, std=None, temporal_context=False, static=None):
