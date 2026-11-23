@@ -29,18 +29,33 @@ from downscale.precipitation import check_pack
 from scripts.precipitation import write_pack
 
 
+def listed_days(path):
+    """Days from a ``choose`` file (scripts/precipitation_test_pack.py)."""
+    return [pd.Timestamp(d) for d in json.loads(Path(path).read_text())['days']]
+
+
 def periods(cfg):
+    """Training months, plus validation and test days.
+
+    ``annual.years`` (list) trains on several years; ``annual.year`` keeps the
+    single-year behaviour. ``validation_days`` and ``test_days`` point to day
+    lists chosen from gauges; otherwise the 15th of the month is used, which is
+    often dry over France.
+    """
+    annual = cfg['annual']
+    years = annual.get('years') or [annual['year']]
     result = []
-    year = cfg['annual']['year']
-    for month in range(1, 13):
-        start = pd.Timestamp(year=year, month=month, day=1)
-        end = start + pd.offsets.MonthBegin()
-        result.append(('train', start, end))
-    for year, months, role in [(cfg['annual']['validation_year'], range(1, 13), 'validation'),
-                               (cfg['annual']['test_year'], [1, 4, 7, 10], 'test')]:
-        for month in months:
-            start = pd.Timestamp(year=year, month=month, day=15)
-            result.append((role, start, start + pd.Timedelta(days=1)))
+    for year in years:
+        for month in range(1, 13):
+            start = pd.Timestamp(year=year, month=month, day=1)
+            result.append(('train', start, start + pd.offsets.MonthBegin()))
+    for role, key, year, months in [('validation', 'validation_days', annual['validation_year'], range(1, 13)),
+                                    ('test', 'test_days', annual['test_year'], [1, 4, 7, 10])]:
+        days = listed_days(annual[key]) if annual.get(key) else \
+            [pd.Timestamp(year=year, month=m, day=15) for m in months]
+        if any(d.year in years for d in days):
+            raise ValueError(f'{role} days overlap the training years {years}')
+        result += [(role, d, d + pd.Timedelta(days=1)) for d in days]
     return result
 
 
