@@ -34,7 +34,7 @@ training:
   seed: 0
   paired_noise: true
   max_steps: null
-  init_checkpoint: runs/precipitation_terrain/model.pt
+  init_checkpoint: /fsx/emma_scharfmann/.cache/huggingface/hub/models--EmmaScharfmann--france-precipitation-downscaler/snapshots/33bce9237bfe4e43e6bdd16e57cfc9ab07c74f09/model.pt
   selection: joint
   resume: true
   checkpoint_every_steps: 100
