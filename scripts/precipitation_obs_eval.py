@@ -111,9 +111,10 @@ def main():
     # Spectra on the largest square observed at every hour, same box for all.
     box = metrics.complete_box(pardig)
     if box is not None:
-        r, c, s = box
-        crop = lambda a: a[..., r:r + s, c:c + s]
-        report["spectrum_box"] = {"lat": [float(lat[r]), float(lat[r + s - 1])], "lon": [float(lon[c]), float(lon[c + s - 1])]}
+        r, c, s, hours = box
+        crop = lambda a: a[hours][..., r:r + s, c:c + s]
+        report["spectrum_box"] = {"lat": [float(lat[r]), float(lat[r + s - 1])], "lon": [float(lon[c]), float(lon[c + s - 1])],
+                                  "hours": int(hours.sum())}
         report["spectra"] = {} if radar is None else {"EURADCLIM": metrics.spectrum(crop(radar), cell_km)}
         for name, forecast in models.items():
             report["spectra"][name] = metrics.spectrum(crop(forecast).reshape(-1, s, s), cell_km)

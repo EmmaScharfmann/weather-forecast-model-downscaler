@@ -341,7 +341,10 @@ def load_euradclim(times, lat, lon, cache, min_coverage=0.9):
                 result[position[stamp]] = aggregate(values)
     missing = np.isnan(result).all((1, 2))
     if missing.any():
-        raise ValueError(f"EURADCLIM has no field for {list(times[missing][:3])}...")
+        # Real gaps exist (e.g. 7 empty hours on 2023-10-30): score those hours
+        # against gauges and PARDIG only, rather than stopping the evaluation.
+        print(f"EURADCLIM has no field for {missing.sum()} hours, e.g. {list(times[missing][:3])}; "
+              "they are left out of the radar scores", flush=True)
     out.parent.mkdir(parents=True, exist_ok=True)
     np.save(out, result)
     return result

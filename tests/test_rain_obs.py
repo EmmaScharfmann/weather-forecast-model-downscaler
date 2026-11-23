@@ -67,8 +67,16 @@ def test_complete_box_finds_the_fully_observed_square():
     reference = np.full((2, 50, 60), 1.0)
     reference[0, :10] = np.nan
     reference[1, :, 45:] = np.nan
-    row, col, size = metrics.complete_box(reference, min_size=8)
-    assert size == 40 and row >= 10 and col + size <= 45
+    row, col, size, hours = metrics.complete_box(reference, min_size=8)
+    assert size == 40 and row >= 10 and col + size <= 45 and hours.all()
+
+
+def test_complete_box_skips_empty_and_patchy_hours():
+    reference = np.full((3, 40, 40), 1.0)
+    reference[1] = np.nan                 # empty hour, like EURADCLIM on 2023-10-30
+    reference[2, ::2, ::2] = np.nan       # patchy hour: no large square is always observed
+    row, col, size, hours = metrics.complete_box(reference, min_size=8)
+    assert size == 40 and hours.tolist() == [True, False, False]
 
 
 def test_aggregator_averages_pixels_and_drops_poorly_observed_cells():

@@ -128,18 +128,26 @@ def qq(forecast, reference, quantiles=np.linspace(0.9, 0.9999, 60)):
 
 
 def complete_box(reference, min_size=32):
-    """Largest square (row, col, size) observed at every hour, for spectra."""
-    ok = _valid(reference).all(0)
-    h, w = ok.shape
-    best = np.zeros((h + 1, w + 1), dtype=int)
-    top = (0, 0, 0)
-    for i in range(h):
-        for j in range(w):
-            if ok[i, j]:
-                best[i + 1, j + 1] = 1 + min(best[i, j], best[i + 1, j], best[i, j + 1])
-                if best[i + 1, j + 1] > top[2]:
-                    top = (i - best[i + 1, j + 1] + 1, j - best[i + 1, j + 1] + 1, best[i + 1, j + 1])
-    return top if top[2] >= min_size else None
+    """Largest square observed at every kept hour, for spectra: (row, col, size, hours).
+
+    Empty hours are always dropped. If partly observed hours leave no square of
+    ``min_size``, only the best-observed hours are kept. Returns None if none fits.
+    """
+    observed = _valid(reference).mean((1, 2))
+    for hours in (observed > 0, observed >= observed.max() - 0.01):
+        ok = _valid(reference[hours]).all(0)
+        h, w = ok.shape
+        best = np.zeros((h + 1, w + 1), dtype=int)
+        top = (0, 0, 0)
+        for i in range(h):
+            for j in range(w):
+                if ok[i, j]:
+                    best[i + 1, j + 1] = 1 + min(best[i, j], best[i + 1, j], best[i, j + 1])
+                    if best[i + 1, j + 1] > top[2]:
+                        top = (i - best[i + 1, j + 1] + 1, j - best[i + 1, j + 1] + 1, best[i + 1, j + 1])
+        if top[2] >= min_size:
+            return (*top, hours)
+    return None
 
 
 def spectrum(fields, cell_km=10.0):
