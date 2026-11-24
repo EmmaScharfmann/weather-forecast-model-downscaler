@@ -26,10 +26,10 @@ import xarray as xr
 import yaml
 import zarr
 
-from downscale.precip_data import ERA5_NAMES, PARDIG_TIMESERIES, condition_on_intervals, crop, open_store
-from downscale.precipitation import check_pack
-from downscale.rain_resume import atomic_json
-from downscale.sources import ERA5_ARCO
+from downscaler.data.coarse_sources import ERA5_ARCO
+from downscaler.data.precipitation_pairs import ERA5_NAMES, PARDIG_TIMESERIES, condition_on_intervals, crop, open_store
+from downscaler.models.precipitation import check_pack
+from downscaler.training.resume import atomic_json
 from scripts.precipitation import write_pack
 
 

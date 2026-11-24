@@ -18,7 +18,7 @@ import eval_downscaled  # noqa: E402
 import fetch_forecasts  # noqa: E402
 from conftest import coarse_terrain, diurnal, terrain  # noqa: E402
 
-from downscale.config import load_config  # noqa: E402
+from downscaler.config import load_config  # noqa: E402
 
 
 def torch_modules():
@@ -30,7 +30,7 @@ def torch_modules():
     pytest.importorskip("torch", reason="torch is not installed")
     import downscale_forecasts
 
-    from downscale import downscaler
+    from downscaler.models import temperature as downscaler
 
     return downscale_forecasts, downscaler
 
@@ -587,7 +587,7 @@ def test_hourly_forecasts_are_written_for_every_hour_and_scored_against_stations
     import downscale_hourly
     import torch
 
-    from downscale import hourly
+    from downscaler.models import hourly_temperature as hourly
 
     torch.manual_seed(0)
     net = hourly.HourlyNet(hourly.HourlyConfig(loss="crps", base=8, depth=3, noise_channels=4))

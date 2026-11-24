@@ -11,8 +11,15 @@ import pytest
 import torch
 import xarray as xr
 
-from downscale.precip_data import PARDIG, condition_on_intervals, crop, forecast_pack, hourly_pardig, read_cost
-from downscale.precipitation import (
+from downscaler.data.precipitation_pairs import (
+    PARDIG,
+    condition_on_intervals,
+    crop,
+    forecast_pack,
+    hourly_pardig,
+    read_cost,
+)
+from downscaler.models.precipitation import (
     RainConfig,
     RainNet,
     check_pack,
@@ -103,7 +110,7 @@ def test_read_planner_counts_boundary_chunks_without_reading_rainfall():
 
 
 def test_endpoint_only_download_matches_full_hourly_conditioning(monkeypatch):
-    import downscale.precip_data as data
+    import downscaler.data.precipitation_pairs as data
 
     ds = pack()
     calls = []

@@ -6,8 +6,16 @@ import pytest
 import torch
 import xarray as xr
 
-from downscale.precipitation import RainConfig, RainNet, features, predict, rain_loss, save_model, temporal_scores
-from downscale.rain_temporal import context_inputs, hourly_baseline, trajectory_noise
+from downscaler.models.precipitation import (
+    RainConfig,
+    RainNet,
+    features,
+    predict,
+    rain_loss,
+    save_model,
+    temporal_scores,
+)
+from downscaler.processing.precipitation_temporal import context_inputs, hourly_baseline, trajectory_noise
 
 
 def pack():

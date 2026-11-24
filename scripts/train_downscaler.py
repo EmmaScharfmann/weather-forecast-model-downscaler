@@ -40,16 +40,16 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from downscale import downscaler as dsc
-from downscale import hourly as hr
-from downscale.config import Config, load_config
-from downscale.constants import COAST_CHANNEL, elevation_edges
-from downscale.diagnostics import (
+from downscaler.config import Config, load_config
+from downscaler.constants import COAST_CHANNEL, elevation_edges
+from downscaler.evaluation.diagnostics import (
     distance_to_coast_km,
     grid_spacing_km,
     land_mask,
     maritime_influence,
 )
+from downscaler.models import hourly_temperature as hr
+from downscaler.models import temperature as dsc
 
 
 logger = logging.getLogger("train")
@@ -220,7 +220,7 @@ def validate(
     """Score the model and plain interpolation over the validation period.
 
     :param net: Network to evaluate.
-    :type net: downscale.downscaler.DownscalerNet
+    :type net: downscaler.models.temperature.DownscalerNet
     :param coarse: Coarse validation fields [K].
     :type coarse: numpy.ndarray
     :param fine: Target validation fields [K].
@@ -291,7 +291,7 @@ def figures(out: Path, history: list[dict], model: dsc.Downscaler, coarse, fine,
     :param history: Per-epoch records.
     :type history: list[dict]
     :param model: Best model, used for the map.
-    :type model: downscale.downscaler.Downscaler
+    :type model: downscaler.models.temperature.Downscaler
     :param coarse: Coarse validation fields [K].
     :type coarse: numpy.ndarray
     :param fine: Target validation fields [K].
@@ -403,7 +403,7 @@ class Validator:
         :param ends: Index of the end of its window.
         :type ends: numpy.ndarray
         :param spatial: The spatial model.
-        :type spatial: downscale.downscaler.Downscaler
+        :type spatial: downscaler.models.temperature.Downscaler
         :param land: Land mask over the grid.
         :type land: numpy.ndarray
         :param members: Ensemble members to draw.
@@ -422,7 +422,7 @@ class Validator:
         """Score some methods over the validation hours.
 
         :param net: Hourly network.
-        :type net: downscale.hourly.HourlyNet
+        :type net: downscaler.models.hourly_temperature.HourlyNet
         :param stats: Normalisation statistics of the hourly model.
         :type stats: dict
         :param methods: Methods to score, among :data:`METHODS`.
@@ -549,7 +549,7 @@ def train_spatial(cfg: Config, args: argparse.Namespace) -> int:
     """Train the spatial downscaler.
 
     :param cfg: Configuration, with the command-line values already applied.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :param args: Parsed arguments, for the output, pairs, validation period and device.
     :type args: argparse.Namespace
     :returns: Exit status.
@@ -739,7 +739,7 @@ def train_temporal(cfg: Config, out: Path, pairs_dir: Path, device: str | None =
 
     :param cfg: Configuration, with the command-line values already applied; ``temporal`` holds the
         spatial model to start from, the validation period and the loss's block sizes.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :param out: Run directory.
     :type out: pathlib.Path
     :param pairs_dir: Hourly pairs from ``build_pairs.py``.

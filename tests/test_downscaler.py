@@ -6,8 +6,8 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="torch is installed with requirements/downscaler.txt")
 
-from downscale import downscaler as dsc  # noqa: E402
-from downscale.constants import CHANNELS  # noqa: E402
+from downscaler.constants import CHANNELS  # noqa: E402
+from downscaler.models import temperature as dsc  # noqa: E402
 
 
 def test_fair_crps_matches_the_explicit_formula():

@@ -123,14 +123,14 @@ import pandas as pd
 import xarray as xr
 from huggingface_hub import hf_hub_download
 
-from downscale.constants import COARSE_CROP_MARGIN_DEG, ZERO_C
-from downscale.downscaler import Downscaler
-from downscale.evaluation import at_valid_times, lead_scores, stack_members, station_rmse
-from downscale.fetch import get_target
-from downscale.inference import downscale_forecast, save_downscaled
-from downscale.plots import map_grid, maps, native_cells, station_maps
-from downscale.regions import parse_region
-from downscale.sources import (
+from downscaler.constants import COARSE_CROP_MARGIN_DEG, ZERO_C
+from downscaler.models.temperature import Downscaler
+from downscaler.evaluation.ensemble_scores import at_valid_times, lead_scores, stack_members, station_rmse
+from downscaler.data.fetch import get_target
+from downscaler.models.temperature_inference import downscale_forecast, save_downscaled
+from downscaler.visualization.plots import map_grid, maps, native_cells, station_maps
+from downscaler.data.regions import parse_region
+from downscaler.data.coarse_sources import (
     available_inits,
     fetch_forecast,
     forecast_box,
@@ -138,8 +138,8 @@ from downscale.sources import (
     save_forecast,
     store_name,
 )
-from downscale.station_interp import curvilinear_for
-from downscale.stations import load_published_stations
+from downscaler.processing.station_interpolation import curvilinear_for
+from downscaler.data.stations import load_published_stations
 
 MODEL_REPO = "EmmaScharfmann/france-temperature-downscaler"
 FORECASTS = "<earthmover-org>/ecmwf-aifs-ens-forecast-subscription"  # your Earthmover subscription

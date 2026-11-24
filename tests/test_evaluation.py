@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from downscale.evaluation import at_valid_times, elevation_scores, fair_crps, lead_scores, pooled
+from downscaler.evaluation.ensemble_scores import at_valid_times, elevation_scores, fair_crps, lead_scores, pooled
 
 
 def brute_force_crps(ens, obs):
@@ -84,7 +84,7 @@ def test_combining_initialisations_matches_scoring_them_together():
     truth = xr.DataArray(rng.normal(size=(3, 2, 8)), dims=("time", "lead_time", "station"), coords={"lead_time": lead})
     truth[1, 0, :3] = np.nan
     together = lead_scores(forecast, truth)
-    from downscale.evaluation import combine_leads
+    from downscaler.evaluation.ensemble_scores import combine_leads
 
     apart = combine_leads([lead_scores(forecast.isel(time=[i]), truth.isel(time=[i])) for i in range(3)])
     pd.testing.assert_frame_equal(apart[together.columns].reset_index(drop=True), together, check_dtype=False)
@@ -104,7 +104,7 @@ def test_a_single_field_is_scored_by_its_error_alone():
 
 
 def test_native_cells_keep_coarse_blocks_and_hide_the_sea():
-    from downscale.plots import native_cells
+    from downscaler.visualization.plots import native_cells
 
     coarse = xr.DataArray(
         [[1.0, 2.0], [3.0, 4.0]], dims=("lat", "lon"), coords={"lat": [45.25, 45.0], "lon": [0.0, 0.25]}

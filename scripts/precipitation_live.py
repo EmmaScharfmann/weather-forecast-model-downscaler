@@ -20,10 +20,10 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from downscale.hourly import default_device
-from downscale.open_data import _get, decode, file_url
-from downscale.precip_data import crop, forecast_pack
-from downscale.precipitation import check_pack, predict
+from downscaler.data.ecmwf_open_data import _get, decode, file_url
+from downscaler.data.precipitation_pairs import crop, forecast_pack
+from downscaler.models.hourly_temperature import default_device
+from downscaler.models.precipitation import check_pack, predict
 from scripts.precipitation import write_pack
 
 

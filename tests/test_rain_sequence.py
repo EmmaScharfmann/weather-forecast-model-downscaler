@@ -7,9 +7,9 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from downscale.downscaler import UNet
-from downscale.precipitation import RainConfig, RainNet, features, predict, save_model
-from downscale.rain_sequence import TimeMix, TrajectoryUNet, predict_overlapping
+from downscaler.models.precipitation import RainConfig, RainNet, features, predict, save_model
+from downscaler.models.precipitation_sequence import TimeMix, TrajectoryUNet, predict_overlapping
+from downscaler.models.temperature import UNet
 
 
 def test_zero_temporal_adapters_preserve_pretrained_spatial_outputs():

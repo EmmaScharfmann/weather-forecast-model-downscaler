@@ -26,8 +26,8 @@ from pathlib import Path
 
 import xarray as xr
 
-from downscale.config import load_config
-from downscale.publish import (
+from downscaler.config import load_config
+from downscaler.publishing import (
     LICENSE_TEXT,
     ModelArtefacts,
     dataset_card,
@@ -78,7 +78,7 @@ def build_model(args, cfg) -> Path:
     :param args: Parsed arguments.
     :type args: argparse.Namespace
     :param cfg: Pipeline configuration.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :returns: The folder written.
     :rtype: pathlib.Path
     """
@@ -121,7 +121,7 @@ def build_dataset(args, cfg) -> Path:
     :param args: Parsed arguments.
     :type args: argparse.Namespace
     :param cfg: Pipeline configuration.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :returns: The folder written.
     :rtype: pathlib.Path
     :raises FileNotFoundError: If the consolidated pairs are missing.
@@ -168,12 +168,12 @@ def build_target(args, cfg) -> Path:
     :param args: Parsed arguments.
     :type args: argparse.Namespace
     :param cfg: Pipeline configuration.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :returns: The folder written.
     :rtype: pathlib.Path
     :raises FileNotFoundError: If the consolidated target is missing.
     """
-    from downscale.diagnostics import grid_spacing_km
+    from downscaler.evaluation.diagnostics import grid_spacing_km
 
     target_dir = Path(args.target or cfg.paths.target)
     out = Path(args.out)
@@ -190,7 +190,7 @@ def build_target(args, cfg) -> Path:
         if (target_dir / name).exists():
             shutil.copy(target_dir / name, out / name)
 
-    from downscale.constants import TARGET_SOURCES
+    from downscaler.constants import TARGET_SOURCES
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from download_cerra import build_request
@@ -233,15 +233,15 @@ def build_stations(args, cfg, provider=None) -> Path:
     :param args: Parsed arguments.
     :type args: argparse.Namespace
     :param cfg: Pipeline configuration.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :param provider: Station provider; ``None`` builds the configured one.
-    :type provider: downscale.stations.StationProvider | None
+    :type provider: downscaler.data.stations.StationProvider | None
     :returns: The folder written.
     :rtype: pathlib.Path
     """
     import pandas as pd
 
-    from downscale.stations import MeteoFranceHourly, QCConfig, load_stations
+    from downscaler.data.stations import MeteoFranceHourly, QCConfig, load_stations
 
     provider = provider or MeteoFranceHourly()
     out = Path(args.out)

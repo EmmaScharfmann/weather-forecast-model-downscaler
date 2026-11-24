@@ -7,7 +7,7 @@ affects. Dates refer to when the behaviour was observed.
 ## Grids and coordinates
 
 **Cropped regions are not contiguous in storage order.**
-`downscale/regions.py`, `downscale/station_interp.py`
+`src/downscaler/data/regions.py`, `src/downscaler/processing/station_interpolation.py`
 
 Gridded archives store longitudes 0..360 with descending latitudes. A region
 spanning the prime meridian, such as France at 7°W to 11°E, becomes two blocks:
@@ -18,7 +18,7 @@ but anything that interpolates in longitude must convert with `to_signed_lon`
 first.
 
 **The regional reanalysis uses a Lambert grid.**
-`downscale/station_interp.py`, `scripts/download_cerra.py`
+`src/downscaler/processing/station_interpolation.py`, `scripts/download_cerra.py`
 
 CERRA's latitude and longitude are two-dimensional fields over `(y, x)`, so the
 regular-grid interpolator does not apply. `CurvilinearInterpolator` uses a
@@ -63,7 +63,7 @@ between a grid cell and a point appears in the error but in no member.
 ## Station observations
 
 **Station metadata is unreliable about history.**
-`downscale/stations.py`
+`src/downscaler/data/stations.py`
 
 Of about 13,800 Météo-France stations listed inside the France box, roughly 680
 have no start date. A sample of twelve returned no data at all for August 2023;
@@ -79,13 +79,13 @@ report with zero completeness. The network of about 1,800 temperature stations
 is what remains.
 
 **Requesting a closed station fails the whole chunk.**
-`downscale/stations.py`
+`src/downscaler/data/stations.py`
 
 The underlying service raises a missing-file error, which aborts every station
 requested alongside it. The provider retries the chunk one station at a time.
 
 **A corrupted download cache surfaces as an unrelated type error.**
-`downscale/stations.py`
+`src/downscaler/data/stations.py`
 
 An interrupted `wetterdienst` download leaves a half-written entry in
 `~/.cache/wetterdienst`, after which reads fail with
@@ -94,14 +94,14 @@ provider retries that chunk with the cache disabled; clearing the directory
 fixes it permanently.
 
 **The cache key is the window, not the period covered.**
-`downscale/stations.py`
+`src/downscaler/data/stations.py`
 
 Caching per station and window means a request for a different window refetches
 everything. `_covering_dirs` therefore reuses any cached window that fully
 contains the requested one. A narrower request is free; a wider one must fetch.
 
 **Spatial patterns in this domain are usually elevation in disguise.**
-`downscale/diagnostics.py`
+`src/downscaler/evaluation/diagnostics.py`
 
 Two diagnostics were built on predictions that the measurements then
 contradicted, in both cases because the spatial variable was confounded with
@@ -130,13 +130,13 @@ reproduce it by construction. Station observations are the only independent
 truth here, and the only one available after CERRA ends in mid-2021.
 
 **Scores must be summed, not averaged, across initialisations.**
-`downscale/station_scoring.py`
+`src/downscaler/evaluation/station_scoring.py`
 
 Combining must sum the per-case statistics and take the square root afterwards.
 Averaging per-case root mean squared errors differed by 0.56 K in one test.
 
 **Ensembles of different sizes cannot share a dimension name.**
-`downscale/station_scoring.py`, `scripts/eval_downscaled.py`
+`src/downscaler/evaluation/station_scoring.py`, `scripts/eval_downscaled.py`
 
 Putting a 10-member and a 40-member forecast into one dataset under the name
 `ensemble` makes xarray align them, padding the smaller with missing values and
@@ -145,13 +145,13 @@ uses `ensemble_ds`, and the scorer accepts any dimension whose name begins with
 `ensemble`.
 
 **A dense cluster of stations distorts the mean.**
-`downscale/station_scoring.py`
+`src/downscaler/evaluation/station_scoring.py`
 
 With 40 of 50 synthetic stations crammed into one spot and biased by 2 K, the
 unweighted mean bias was 1.61 K and the density-weighted one 0.24 K.
 
 **Bootstrap intervals over a dozen initialisations are illustrative.**
-`downscale/station_scoring.py`
+`src/downscaler/evaluation/station_scoring.py`
 
 Neighbouring initialisations share weather, which is why blocks are resampled
 together. With few cases the intervals describe sampling noise within the
@@ -174,7 +174,7 @@ for the analysis as much as the forecast. No height correction can fix this,
 since it reflects the difference between a cell average and a point.
 
 **Mean squared error and fair CRPS fail differently.**
-`downscale/downscaler.py`
+`src/downscaler/models/temperature.py`
 
 On synthetic data with a known noise floor, the mean squared error model
 reached the best possible root mean squared error with zero spread, while the
@@ -183,7 +183,7 @@ ratio approaching one. The first gives one smooth map; the second keeps
 realistic variability.
 
 **Masking the sea in the loss changes the gradient but not always the result.**
-`downscale/downscaler.py`, `scripts/train_downscaler.py`
+`src/downscaler/models/temperature.py`, `scripts/train_downscaler.py`
 
 With `training.land_only`, the sea is still given to the network as input, since
 coastal gradients carry information, but it is excluded from the loss and from
@@ -196,14 +196,14 @@ competes with the land signal, which is worth testing by training both ways and
 comparing the land scores.
 
 **The output layer starts at zero.**
-`downscale/downscaler.py`
+`src/downscaler/models/temperature.py`
 
 Zero-initialising the final convolution makes the untrained model reproduce the
 interpolated field exactly, so training begins from the baseline rather than
 from noise.
 
 **Excess power at the grid scale comes from the decoder and the noise.**
-`downscale/downscaler.py`
+`src/downscaler/models/temperature.py`
 
 Measured on real data, a trained member carried 0.80 to 0.97 of the target's
 power between 25 and 400 km, where the interpolated coarse field fell to 0.014,
@@ -225,7 +225,7 @@ alone) and then to 67 (both), while the station-scale scores were unchanged to
 three decimal places. The fix is about realism, not accuracy.
 
 **The domain boundary turned out not to inflate the spread.**
-`downscale/diagnostics.py`
+`src/downscaler/evaluation/diagnostics.py`
 
 The expectation was that the network, having less context at the boundary,
 would produce more spread there. Measured over France the opposite holds: the
@@ -241,7 +241,7 @@ compare like terrain with like, for example by profiling within an elevation
 band, rather than treating distance from the boundary as a controlled variable.
 
 **A convolutional network can infer distance from the coast on its own.**
-`downscale/downscaler.py`, `scripts/train_downscaler.py`
+`src/downscaler/models/temperature.py`, `scripts/train_downscaler.py`
 
 The land-sea mask is almost binary at five kilometres, so the expectation was
 that a correction decaying inland would be hard to learn from it and that an

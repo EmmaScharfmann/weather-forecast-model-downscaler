@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from downscale.precip_data import forecast_pack
+from downscaler.data.precipitation_pairs import forecast_pack
 from scripts.precipitation_live import interval_fields, validate_message
 
 

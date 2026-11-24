@@ -32,9 +32,9 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from downscale.config import load_config
-from downscale.constants import elevation_edges
-from downscale.diagnostics import distance_to_coast_km, grid_spacing_km, land_mask
+from downscaler.config import load_config
+from downscaler.constants import elevation_edges
+from downscaler.evaluation.diagnostics import distance_to_coast_km, grid_spacing_km, land_mask
 
 
 logger = logging.getLogger("predictability")

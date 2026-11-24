@@ -8,8 +8,8 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="torch is installed with requirements/downscaler.txt")
 
-from downscale import downscaler as dsc  # noqa: E402
-from downscale import hourly  # noqa: E402
+from downscaler.models import hourly_temperature as hourly  # noqa: E402
+from downscaler.models import temperature as dsc  # noqa: E402
 
 
 @pytest.fixture
@@ -244,7 +244,7 @@ def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_p
 
 
 def test_temporal_spectrum_sees_noise_redrawn_every_hour():
-    from downscale.diagnostics import longest_run, temporal_spectrum
+    from downscaler.evaluation.diagnostics import longest_run, temporal_spectrum
 
     hours = np.arange(96, dtype=float)[:, None, None]
     smooth = np.sin(2 * np.pi * hours / 24) * np.ones((1, 4, 4))

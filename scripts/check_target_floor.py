@@ -31,12 +31,12 @@ from pathlib import Path
 import pandas as pd
 import xarray as xr
 
-from downscale.config import load_config
-from downscale.constants import elevation_edges
-from downscale.diagnostics import floor_figure, score_against_stations
-from downscale.downscaler import Downscaler
-from downscale.station_interp import curvilinear_for
-from downscale.stations import MeteoFranceHourly, QCConfig, load_stations
+from downscaler.config import load_config
+from downscaler.constants import elevation_edges
+from downscaler.data.stations import MeteoFranceHourly, QCConfig, load_stations
+from downscaler.evaluation.diagnostics import floor_figure, score_against_stations
+from downscaler.models.temperature import Downscaler
+from downscaler.processing.station_interpolation import curvilinear_for
 
 
 logger = logging.getLogger("floor")
@@ -84,7 +84,7 @@ def main(argv: Sequence[str] | None = None, provider=None) -> int:
     :param argv: Argument list; ``None`` reads ``sys.argv``.
     :type argv: collections.abc.Sequence[str] | None
     :param provider: Station provider; ``None`` builds the configured one.
-    :type provider: downscale.stations.StationProvider | None
+    :type provider: downscaler.data.stations.StationProvider | None
     :returns: Exit status.
     :rtype: int
     """

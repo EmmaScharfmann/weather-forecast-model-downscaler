@@ -23,13 +23,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from downscale.config import load_config
-from downscale.diagnostics import land_mask, mask_sea, sea_report
-from downscale.downscaler import Downscaler
-from downscale.inference import downscale_forecast
+from downscaler.config import load_config
+from downscaler.evaluation.diagnostics import land_mask, mask_sea, sea_report
+from downscaler.models.temperature import Downscaler
+from downscaler.models.temperature_inference import downscale_forecast
 
 
-logger = logging.getLogger("downscale")
+logger = logging.getLogger("downscaler")
 
 
 def downscale_init(
@@ -40,7 +40,7 @@ def downscale_init(
     :param forecast_path: Forecast store for a single initialisation.
     :type forecast_path: pathlib.Path
     :param model: Trained downscaler.
-    :type model: downscale.downscaler.Downscaler
+    :type model: downscaler.models.temperature.Downscaler
     :param out_dir: Output directory.
     :type out_dir: pathlib.Path
     :param variable: Variable to downscale.

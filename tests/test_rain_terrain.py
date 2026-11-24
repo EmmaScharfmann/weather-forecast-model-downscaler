@@ -6,8 +6,8 @@ import pytest
 import torch
 import xarray as xr
 
-from downscale.precipitation import RainConfig, RainNet, features, predict, save_model
-from downscale.rain_terrain import CHANNELS, expand_terrain_weights, load_static, make_terrain
+from downscaler.models.precipitation import RainConfig, RainNet, features, predict, save_model
+from downscaler.processing.terrain import CHANNELS, expand_terrain_weights, load_static, make_terrain
 
 
 def sources(partial=False):

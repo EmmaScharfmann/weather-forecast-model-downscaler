@@ -20,9 +20,16 @@ import torch
 import xarray as xr
 import yaml
 
-from downscale.hourly import default_device
-from downscale.precip_data import PARDIG, build_pairs, condition_on_intervals, crop, forecast_pack, plan_pardig
-from downscale.precipitation import (
+from downscaler.data.precipitation_pairs import (
+    PARDIG,
+    build_pairs,
+    condition_on_intervals,
+    crop,
+    forecast_pack,
+    plan_pardig,
+)
+from downscaler.models.hourly_temperature import default_device
+from downscaler.models.precipitation import (
     RainConfig,
     RainNet,
     check_pack,
@@ -68,7 +75,7 @@ def train(ds, cfg, out, device):
     model_cfg = RainConfig(**cfg["model"], window_hours=window)
     static, static_metadata = None, None
     if model_cfg.terrain:
-        from downscale.rain_terrain import load_static
+        from downscaler.processing.terrain import load_static
 
         static, static_metadata = load_static(cfg["static_path"], ds.lat.values, ds.lon.values)
     initial = None
@@ -89,7 +96,7 @@ def train(ds, cfg, out, device):
         x_val, _, _ = features(ds.isel(time=validation), mean, std, True, static)
     else:
         # Store only normalised predictors; other channels are added per batch.
-        from downscale.precipitation import FeatureStack
+        from downscaler.models.precipitation import FeatureStack
 
         if initial is not None:
             mean, std = initial["mean"].numpy(), initial["std"].numpy()
@@ -112,7 +119,7 @@ def train(ds, cfg, out, device):
     if initial is not None:
         state = initial["state_dict"]
         if model_cfg.terrain:
-            from downscale.rain_terrain import CHANNELS, expand_terrain_weights
+            from downscaler.processing.terrain import CHANNELS, expand_terrain_weights
 
             state = expand_terrain_weights(state, net.state_dict(), len(CHANNELS))
         missing, unexpected = net.load_state_dict(state, strict=False)
@@ -125,7 +132,7 @@ def train(ds, cfg, out, device):
     baseline = ds.predictors.isel(variable=0).values.astype("float32")
     coherent = model_cfg.temporal_context or model_cfg.architecture == "joint"
     if coherent:
-        from downscale.rain_temporal import hourly_baseline, trajectory_noise
+        from downscaler.processing.precipitation_temporal import hourly_baseline, trajectory_noise
 
         baseline = np.empty_like(baseline)
         baseline[training] = hourly_baseline(ds.isel(time=training))
@@ -144,7 +151,7 @@ def train(ds, cfg, out, device):
         raise ValueError("no contiguous training sequences of the configured length")
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    from downscale.rain_resume import atomic_json, identity, save_resume
+    from downscaler.training.resume import atomic_json, identity, save_resume
 
     fingerprint = identity(ds, cfg, mean, std, static)
     history, best, stale, start_epoch, cursor = [], float("inf"), 0, 0, 0
@@ -254,7 +261,7 @@ def train(ds, cfg, out, device):
                     ds.time.values[validation], 8, len(ds.lat), len(ds.lon), model_cfg.noise_factor, window
                 )
             if model_cfg.architecture == "joint":
-                from downscale.rain_sequence import predict_overlapping
+                from downscaler.models.precipitation_sequence import predict_overlapping
 
                 preds.append(
                     predict_overlapping(
@@ -377,7 +384,7 @@ def main():
     args = parser.parse_args()
     cfg = yaml.safe_load(Path(args.config).read_text())
     if args.command == "terrain":
-        from downscale.rain_terrain import build_terrain
+        from downscaler.processing.terrain import build_terrain
 
         grid = xr.open_zarr(args.grid)
         ds = build_terrain(grid.lat.values, grid.lon.values, args.cerra)
@@ -460,7 +467,7 @@ def main():
         predictions = predict(args.model, ds, args.device, args.members, noise_seed=cfg.get("evaluation_noise_seed"))
         report = evaluate_rain(predictions, ds)
         if checkpoint["config"].get("terrain") or cfg.get("static_path"):
-            from downscale.rain_terrain import load_static, terrain_scores
+            from downscaler.processing.terrain import load_static, terrain_scores
 
             if checkpoint["config"].get("terrain"):
                 static = checkpoint["static"].numpy()

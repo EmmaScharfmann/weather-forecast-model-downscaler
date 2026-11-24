@@ -48,7 +48,7 @@ def test_feature_stack_matches_features_and_saves_memory():
     import numpy as np
     import xarray as xr
 
-    from downscale.precipitation import FeatureStack, features
+    from downscaler.models.precipitation import FeatureStack, features
 
     rng = np.random.default_rng(0)
     n, h, w = 30, 6, 7
@@ -81,7 +81,7 @@ def test_blocked_hourly_baseline_matches_single_pass():
     import numpy as np
     import xarray as xr
 
-    from downscale.rain_temporal import hourly_baseline
+    from downscaler.processing.precipitation_temporal import hourly_baseline
 
     rng = np.random.default_rng(1)
     times = pd.DatetimeIndex(

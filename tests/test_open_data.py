@@ -9,7 +9,7 @@ import pytest
 
 eccodes = pytest.importorskip("eccodes")
 
-from downscale import open_data  # noqa: E402
+from downscaler.data import ecmwf_open_data as open_data  # noqa: E402
 
 
 def message(number: int, value: float) -> bytes:

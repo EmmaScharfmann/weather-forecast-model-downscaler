@@ -8,7 +8,7 @@ import pytest
 import torch
 import xarray as xr
 
-from downscale.precip_data import ERA5_NAMES, build_pairs, condition_on_intervals
+from downscaler.data.precipitation_pairs import ERA5_NAMES, build_pairs, condition_on_intervals
 from scripts.precipitation_year import aggregate_quarters, day_pack, hour_ends, periods, tile_indices
 
 
@@ -32,7 +32,7 @@ def test_annual_split_and_native_tile_indices():
 
 
 def test_daily_preparation_matches_existing_pair_semantics(monkeypatch):
-    import downscale.precip_data as data
+    import downscaler.data.precipitation_pairs as data
 
     times = pd.date_range("2019-01-01T01", periods=24, freq="h")
     lat, lon = np.arange(3.0), np.arange(4.0)
@@ -68,7 +68,7 @@ def test_daily_preparation_matches_existing_pair_semantics(monkeypatch):
 
 
 def test_mid_epoch_resume_reproduces_uninterrupted_training(tmp_path, monkeypatch):
-    import downscale.rain_resume as resume
+    import downscaler.training.resume as resume
     from scripts.precipitation import train
 
     n, h, w = 36, 5, 7

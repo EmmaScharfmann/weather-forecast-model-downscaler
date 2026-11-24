@@ -35,8 +35,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from downscale.config import Config, load_config
-from downscale.constants import T2M_RANGE_K, G
+from downscaler.config import Config, load_config
+from downscaler.constants import T2M_RANGE_K, G
 
 
 logger = logging.getLogger("cerra")
@@ -361,7 +361,7 @@ def adopt_crop(out: Path, like: str) -> dict:
     :rtype: dict
     :raises ValueError: If the dataset records no crop, or this download already has a different one.
     """
-    from downscale.fetch import _manifest
+    from downscaler.data.fetch import _manifest
 
     manifest = _manifest(like)
     if not manifest or "crop" not in manifest:
@@ -379,7 +379,7 @@ def do_static(cfg: Config, out: Path, client=None, opener: Callable = open_grib)
     """Download and crop the time-invariant fields.
 
     :param cfg: Pipeline configuration.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :param out: Output directory.
     :type out: pathlib.Path
     :param client: Climate Data Store client; ``None`` builds one.
@@ -443,7 +443,7 @@ def do_month(
     """Download, crop and check one month.
 
     :param cfg: Pipeline configuration.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :param out: Output directory.
     :type out: pathlib.Path
     :param year: Calendar year.
@@ -512,7 +512,7 @@ def consolidate(cfg: Config, out: Path, months: Sequence[tuple[int, int]] | None
     """Merge the downloaded months into a single store.
 
     :param cfg: Pipeline configuration.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :param out: Output directory.
     :type out: pathlib.Path
     :param months: ``(year, month)`` pairs to merge; ``None`` merges every month of ``target.years``.

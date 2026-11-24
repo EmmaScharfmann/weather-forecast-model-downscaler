@@ -12,7 +12,7 @@ one store per initialisation, which ``downscale_forecasts.py`` and
 Reading from Earthmover needs an account: run ``arraylake auth login`` or set
 ``ARRAYLAKE_TOKEN``. ``--source open-data`` reads AIFS-ENS from ECMWF's open data
 instead, which needs no account and holds every run since mid-2025; ``open-data:ifs-ens``
-(or another model of ``downscale.open_data.MODELS``) reads another model from it.
+(or another model of ``downscaler.data.ecmwf_open_data.MODELS``) reads another model from it.
 """
 
 from __future__ import annotations
@@ -25,10 +25,17 @@ from pathlib import Path
 
 import pandas as pd
 
-from downscale.config import load_config
-from downscale.constants import COARSE_CROP_MARGIN_DEG
-from downscale.open_data import MODELS, fetch_open_data
-from downscale.sources import available_inits, fetch_forecast, forecast_box, open_forecasts, save_forecast, store_name
+from downscaler.config import load_config
+from downscaler.constants import COARSE_CROP_MARGIN_DEG
+from downscaler.data.coarse_sources import (
+    available_inits,
+    fetch_forecast,
+    forecast_box,
+    open_forecasts,
+    save_forecast,
+    store_name,
+)
+from downscaler.data.ecmwf_open_data import MODELS, fetch_open_data
 
 
 logger = logging.getLogger("fetch")

@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from downscale import station_scoring as ss
+from downscaler.evaluation import station_scoring as ss
 
 
 def make_case(n_init=6, n_lead=8, n_members=10, n_stations=60, seed=0, bias=0.0, gaps=0.0, clustered=False):

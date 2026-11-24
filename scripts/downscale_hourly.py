@@ -32,9 +32,9 @@ from pathlib import Path
 
 import xarray as xr
 
-from downscale import hourly as hr
-from downscale.config import load_config
-from downscale.inference import downscale_forecast
+from downscaler.config import load_config
+from downscaler.models import hourly_temperature as hr
+from downscaler.models.temperature_inference import downscale_forecast
 
 
 logger = logging.getLogger("downscale_hourly")
@@ -71,9 +71,9 @@ def run_one(forecast_path: Path, hourly, spatial, out: Path, variable: str, samp
     :param forecast_path: 6-hourly forecast store.
     :type forecast_path: pathlib.Path
     :param hourly: Hourly model.
-    :type hourly: downscale.hourly.HourlyDownscaler
+    :type hourly: downscaler.models.hourly_temperature.HourlyDownscaler
     :param spatial: Spatial model.
-    :type spatial: downscale.downscaler.Downscaler
+    :type spatial: downscaler.models.temperature.Downscaler
     :param out: Output directory.
     :type out: pathlib.Path
     :param variable: Variable to downscale.

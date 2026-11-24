@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from downscale.stations import QCConfig, holdout_mask, load_stations
+from downscaler.data.stations import QCConfig, holdout_mask, load_stations
 
 
 START, END = pd.Timestamp("2023-08-05"), pd.Timestamp("2023-08-07 23:00")
@@ -242,7 +242,7 @@ def published_two_periods(folder):
 
 
 def test_one_period_of_a_merged_set_holds_only_its_hours_and_stations(tmp_path):
-    from downscale.stations import load_published_stations
+    from downscaler.data.stations import load_published_stations
 
     folder = published_two_periods(tmp_path / "stations")
     august_2025 = load_published_stations(folder, start="2025-08-01", end="2025-08-31")
@@ -255,7 +255,7 @@ def test_one_period_of_a_merged_set_holds_only_its_hours_and_stations(tmp_path):
 
 
 def test_a_merged_set_covers_each_period_but_not_the_gap(tmp_path):
-    from downscale.fetch import _covers, _manifest
+    from downscaler.data.fetch import _covers, _manifest
 
     manifest = _manifest(published_two_periods(tmp_path / "stations"))
     assert _covers(manifest, pd.Timestamp("2025-08-03"), pd.Timestamp("2025-08-20"))
@@ -264,7 +264,7 @@ def test_a_merged_set_covers_each_period_but_not_the_gap(tmp_path):
 
 
 def test_loading_retries_a_timeout_and_then_gives_up():
-    from downscale import fetch
+    from downscaler.data import fetch as fetch
 
     class Flaky:
         calls = 0

@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from downscale.sources import ERA5, available_inits, fetch_forecast, open_forecasts, save_forecast
+from downscaler.data.coarse_sources import ERA5, available_inits, fetch_forecast, open_forecasts, save_forecast
 
 
 def earthmover_archive(inits, ingested=None, members=5, leads=7):
@@ -200,7 +200,7 @@ def test_a_folder_of_stores_written_per_initialisation_opens_as_one_archive(arch
 
 
 def test_a_downscaled_store_is_replaced_only_when_complete(tmp_path):
-    from downscale.inference import save_downscaled
+    from downscaler.models.temperature_inference import save_downscaled
 
     path = tmp_path / "run.zarr"
     first = xr.Dataset({"t2m_ds": ("x", np.zeros(3))})
@@ -211,7 +211,7 @@ def test_a_downscaled_store_is_replaced_only_when_complete(tmp_path):
 
 
 def test_without_earthmover_the_public_era5_copy_is_read_with_a_filled_surface_geopotential(monkeypatch):
-    from downscale import sources
+    from downscaler.data import coarse_sources as sources
 
     lat, lon = np.arange(90.0, -90.25, -45.0), np.arange(0.0, 360.0, 90.0)
     times = pd.to_datetime(["1940-01-01", "2000-01-01", "2020-08-01"])

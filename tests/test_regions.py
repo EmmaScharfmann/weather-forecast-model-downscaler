@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from downscale.regions import crop_indices, parse_region, to_signed_lon
+from downscaler.data.regions import crop_indices, parse_region, to_signed_lon
 
 
 def test_parse_region_accepts_presets_strings_and_sequences():

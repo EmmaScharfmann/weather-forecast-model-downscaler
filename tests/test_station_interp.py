@@ -5,7 +5,7 @@ import pytest
 import xarray as xr
 from conftest import signed, terrain
 
-from downscale.station_interp import (
+from downscaler.processing.station_interpolation import (
     CurvilinearInterpolator,
     GridInterpolator,
     analysis_baseline,

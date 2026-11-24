@@ -33,7 +33,7 @@ import pandas as pd  # noqa: E402
 import xarray as xr  # noqa: E402
 from matplotlib import animation  # noqa: E402
 
-from downscale.config import load_config  # noqa: E402
+from downscaler.config import load_config  # noqa: E402
 
 
 logger = logging.getLogger("movie")
@@ -114,13 +114,13 @@ def observed(cfg, valid: pd.DatetimeIndex) -> xr.Dataset:
     """Station observations at every hour of the forecast.
 
     :param cfg: Configuration.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :param valid: Valid times.
     :type valid: pandas.DatetimeIndex
     :returns: Stations with ``t2m`` in degrees Celsius over ``(station, time)``.
     :rtype: xarray.Dataset
     """
-    from downscale.stations import MeteoFranceHourly, QCConfig, at_times, load_stations
+    from downscaler.data.stations import MeteoFranceHourly, QCConfig, at_times, load_stations
 
     stations, _ = load_stations(
         MeteoFranceHourly(),

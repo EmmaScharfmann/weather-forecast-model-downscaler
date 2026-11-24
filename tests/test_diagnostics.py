@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from downscale.diagnostics import (
+from downscaler.evaluation.diagnostics import (
     distance_from_edge,
     edge_figure,
     edge_profile,
@@ -125,7 +125,7 @@ def smooth_field(ny, nx, scale_cells, rng):
 
 
 def test_grid_spacing_matches_a_known_geometry():
-    from downscale.diagnostics import grid_spacing_km
+    from downscaler.evaluation.diagnostics import grid_spacing_km
 
     ny, nx = 40, 50
     yy, xx = np.meshgrid(np.arange(ny), np.arange(nx), indexing="ij")
@@ -135,7 +135,7 @@ def test_grid_spacing_matches_a_known_geometry():
 
 
 def test_white_noise_has_a_flat_spectrum():
-    from downscale.diagnostics import power_spectrum
+    from downscaler.evaluation.diagnostics import power_spectrum
 
     rng = np.random.default_rng(0)
     spectrum = power_spectrum(rng.normal(size=(8, 96, 96)), spacing_km=5.0)
@@ -144,7 +144,7 @@ def test_white_noise_has_a_flat_spectrum():
 
 
 def test_a_smooth_field_loses_power_at_short_wavelengths():
-    from downscale.diagnostics import power_spectrum
+    from downscaler.evaluation.diagnostics import power_spectrum
 
     rng = np.random.default_rng(1)
     fields = np.stack([smooth_field(96, 96, 4, rng) for _ in range(6)])
@@ -155,7 +155,7 @@ def test_a_smooth_field_loses_power_at_short_wavelengths():
 
 
 def test_comparison_detects_too_little_and_too_much_small_scale_power():
-    from downscale.diagnostics import effective_resolution_km, spectrum_comparison
+    from downscaler.evaluation.diagnostics import effective_resolution_km, spectrum_comparison
 
     rng = np.random.default_rng(2)
     target = np.stack([smooth_field(96, 96, 2, rng) for _ in range(6)])
@@ -171,7 +171,7 @@ def test_comparison_detects_too_little_and_too_much_small_scale_power():
 
 
 def test_spectrum_figure_is_written(tmp_path):
-    from downscale.diagnostics import spectrum_comparison, spectrum_figure
+    from downscaler.evaluation.diagnostics import spectrum_comparison, spectrum_figure
 
     rng = np.random.default_rng(3)
     target = np.stack([smooth_field(64, 64, 2, rng) for _ in range(3)])
@@ -210,7 +210,7 @@ def station_case(n_stations=60, n_init=3, n_lead=4, n_members=5, seed=0, mountai
 
 
 def test_station_errors_recover_a_known_bias():
-    from downscale.diagnostics import StationErrors
+    from downscaler.evaluation.diagnostics import StationErrors
 
     forecast, obs = station_case(mountain_gain=False)
     forecast["coarse"] = forecast["coarse"] + 2.0
@@ -224,7 +224,7 @@ def test_station_errors_recover_a_known_bias():
 
 
 def test_improvement_tracks_elevation_when_it_should(tmp_path):
-    from downscale.diagnostics import StationErrors, improvement_figure
+    from downscaler.evaluation.diagnostics import StationErrors, improvement_figure
 
     forecast, obs = station_case(mountain_gain=True)
     accumulator = StationErrors(["coarse", "downscaled"])
@@ -238,7 +238,7 @@ def test_improvement_tracks_elevation_when_it_should(tmp_path):
 
 
 def test_improvement_is_flat_when_the_methods_are_equivalent(tmp_path):
-    from downscale.diagnostics import StationErrors, improvement_figure
+    from downscaler.evaluation.diagnostics import StationErrors, improvement_figure
 
     forecast, obs = station_case(mountain_gain=False)
     accumulator = StationErrors(["coarse", "downscaled"])
@@ -248,7 +248,7 @@ def test_improvement_is_flat_when_the_methods_are_equivalent(tmp_path):
 
 
 def test_quantiles_show_a_damped_distribution(tmp_path):
-    from downscale.diagnostics import DistributionSamples, quantile_figure
+    from downscaler.evaluation.diagnostics import DistributionSamples, quantile_figure
 
     forecast, obs = station_case(n_stations=200, mountain_gain=False)
     forecast["coarse"].mean("station")
@@ -264,7 +264,7 @@ def test_quantiles_show_a_damped_distribution(tmp_path):
 
 
 def test_station_error_figure_is_written(tmp_path):
-    from downscale.diagnostics import StationErrors, station_error_figure
+    from downscaler.evaluation.diagnostics import StationErrors, station_error_figure
 
     forecast, obs = station_case()
     accumulator = StationErrors(["coarse", "downscaled"])
@@ -274,7 +274,7 @@ def test_station_error_figure_is_written(tmp_path):
 
 
 def test_distance_to_coast_grows_inland():
-    from downscale.diagnostics import distance_to_coast_km
+    from downscaler.evaluation.diagnostics import distance_to_coast_km
 
     mask = np.ones((40, 60), bool)
     mask[:, :10] = False
@@ -285,7 +285,7 @@ def test_distance_to_coast_grows_inland():
 
 
 def test_coast_profile_separates_coastal_from_inland_gains(tmp_path):
-    from downscale.diagnostics import coast_figure, coast_profile
+    from downscaler.evaluation.diagnostics import coast_figure, coast_profile
 
     rng = np.random.default_rng(0)
     n = 300

@@ -31,7 +31,7 @@ import yaml
 
 
 def choose(args):
-    from downscale.rain_obs import choose_test_days, wet_days
+    from downscaler.data.precipitation_observations import choose_test_days, wet_days
 
     daily = wet_days(args.start, args.end, args.gauge_cache)
     days = choose_test_days(daily, args.per_season, args.quantile, args.seed)
@@ -47,8 +47,8 @@ def choose(args):
 
 
 def build(args):
-    from downscale.precip_data import ERA5_NAMES, crop, open_store
-    from downscale.sources import ERA5_ARCO
+    from downscaler.data.coarse_sources import ERA5_ARCO
+    from downscaler.data.precipitation_pairs import ERA5_NAMES, crop, open_store
     from scripts.precipitation import write_pack
     from scripts.precipitation_obs_eval import resolve_model
     from scripts.precipitation_year import day_pack, hour_ends, targets

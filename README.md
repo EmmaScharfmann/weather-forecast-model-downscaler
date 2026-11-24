@@ -79,10 +79,16 @@ reads IFS ENS (or `ifs`, `aifs-single`) from the same open data.
 
 ## Layout
 
-- `downscale/`: the library. `sources.py` (ERA5 and AIFS-ENS access), `open_data.py` (ECMWF open data),
-  `downscaler.py` (network and checkpoint), `hourly.py` (the hourly model), `inference.py` (apply to a forecast), `evaluation.py` and `plots.py` (scores and figures
-  for the tutorial), `stations.py` and `station_scoring.py` (observations and scoring), `diagnostics.py`
-  (report figures), `fetch.py` and `publish.py` (Hub datasets).
+- `src/downscaler/`: the library, by role.
+  - `data/`: coarse inputs (`coarse_sources.py` for ERA5 and AIFS-ENS, `ecmwf_open_data.py`), targets and
+    observations (`fetch.py`, `stations.py`, `precipitation_pairs.py`, `precipitation_observations.py`), `regions.py`.
+  - `processing/`: `terrain.py`, `station_interpolation.py`, `precipitation_temporal.py`.
+  - `models/`: the temperature downscalers (`temperature.py`, `hourly_temperature.py`, `temperature_inference.py`) and
+    the precipitation downscaler (`precipitation.py`, `precipitation_sequence.py`).
+  - `training/`: `resume.py`.
+  - `evaluation/`: `ensemble_scores.py`, `station_scoring.py`, `precipitation_metrics.py`, `diagnostics.py`.
+  - `visualization/`: `plots.py`.
+  - `config.py`, `constants.py`, `publishing.py` (Hub datasets and model cards).
 - `scripts/`: the pipeline steps above.
 - `tests/`: `uv run pytest`, on synthetic data, no network needed.
 - `findings.md`: behaviour of the data and libraries worth knowing.
@@ -290,7 +296,7 @@ The original and continuous-path experiment configurations are retained for comp
 The direct xarray path works on this project's CPU/Apple MPS environment. The
 optional `--backend earth2studio` calls `earth2studio.data.ARCO_ERA5` for historical
 inputs when Earth2Studio is installed in your environment. The `PARDIG` class in
-`downscale/precip_data.py` follows Earth2Studio's `(time, variable) -> DataArray`
+`src/downscaler/data/precipitation_pairs.py` follows Earth2Studio's `(time, variable) -> DataArray`
 interface for regional hourly `tp` in metres. There is no built-in PARDIG/SatWeave
 Earth2Studio adapter assumed here. Earth2Studio is an optional integration, not
 required for the direct training path.

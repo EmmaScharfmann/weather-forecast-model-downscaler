@@ -28,11 +28,11 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from downscale.config import Config, load_config
-from downscale.constants import COARSE_CROP_MARGIN_DEG, G
-from downscale.diagnostics import land_mask
-from downscale.regions import crop_indices
-from downscale.station_interp import GridInterpolator
+from downscaler.config import Config, load_config
+from downscaler.constants import COARSE_CROP_MARGIN_DEG, G
+from downscaler.data.regions import crop_indices
+from downscaler.evaluation.diagnostics import land_mask
+from downscaler.processing.station_interpolation import GridInterpolator
 
 
 logger = logging.getLogger("pairs")
@@ -272,7 +272,7 @@ def consolidate(cfg: Config, out: Path) -> dict:
     untouched.
 
     :param cfg: Pipeline configuration.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :param out: Output directory.
     :type out: pathlib.Path
     :returns: Normalisation statistics and sanity checks, also written to ``stats.json``.
@@ -432,7 +432,7 @@ def main(argv: Sequence[str] | None = None, source=None, geopotential=None) -> i
 
     static = xr.open_zarr(target_dir / "static.zarr")
     if source is None or geopotential is None:
-        from downscale.sources import open_era5
+        from downscaler.data.coarse_sources import open_era5
 
         era5 = open_era5(cfg.coarse.source)
         source = source or era5

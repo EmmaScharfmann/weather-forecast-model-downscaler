@@ -5,7 +5,7 @@
 # region or period, copy this file and edit it; no code changes are needed.
 
 region:
-  # A preset name from downscale.constants.REGION_PRESETS, or null.
+  # A preset name from downscaler.constants.REGION_PRESETS, or null.
   name: france
   # Explicit bounding box [lat_min, lat_max, lon_min, lon_max], lon in -180..180.
   # Overrides `name` when set. Must cover the target grid plus a margin.

@@ -28,8 +28,14 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from downscale import rain_metrics as metrics
-from downscale.rain_obs import at_stations, gauge_lag_check, gauge_matrix, load_euradclim, load_gauges
+from downscaler.data.precipitation_observations import (
+    at_stations,
+    gauge_lag_check,
+    gauge_matrix,
+    load_euradclim,
+    load_gauges,
+)
+from downscaler.evaluation import precipitation_metrics as metrics
 
 
 def resolve_model(path):
@@ -43,10 +49,10 @@ def resolve_model(path):
 
 def forecasts(pairs, model=None, predictions=None, members=8, seed=2):
     """All compared forecasts as (time, member, lat, lon) arrays in mm."""
-    from downscale.rain_temporal import hourly_baseline
+    from downscaler.processing.precipitation_temporal import hourly_baseline
 
     if predictions is None:
-        from downscale.precipitation import predict
+        from downscaler.models.precipitation import predict
 
         predictions = predict(resolve_model(model), pairs, members=members, noise_seed=seed)
     rain = predictions.precipitation

@@ -3,7 +3,7 @@
 import pytest
 import yaml
 
-from downscale.config import Config, load_config
+from downscaler.config import Config, load_config
 
 
 @pytest.fixture

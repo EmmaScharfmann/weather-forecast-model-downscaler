@@ -23,11 +23,11 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from downscale import station_interp as si
-from downscale import station_scoring as ss
-from downscale.config import load_config
-from downscale.constants import SCORING_REGIONS, elevation_edges
-from downscale.diagnostics import (
+from downscaler.config import load_config
+from downscaler.constants import SCORING_REGIONS, elevation_edges
+from downscaler.data.stations import MeteoFranceHourly, QCConfig, load_stations
+from downscaler.evaluation import station_scoring as ss
+from downscaler.evaluation.diagnostics import (
     DistributionSamples,
     StationErrors,
     coast_figure,
@@ -45,7 +45,7 @@ from downscale.diagnostics import (
     station_error_figure,
     suggested_margin,
 )
-from downscale.stations import MeteoFranceHourly, QCConfig, load_stations
+from downscaler.processing import station_interpolation as si
 
 
 logger = logging.getLogger("eval")
@@ -360,7 +360,7 @@ def run(cfg, forecast_paths, downscaled_paths, out_dir, provider=None) -> dict:
     """Score both forecasts and write the tables and figures.
 
     :param cfg: Pipeline configuration.
-    :type cfg: downscale.config.Config
+    :type cfg: downscaler.config.Config
     :param forecast_paths: Coarse forecast stores.
     :type forecast_paths: collections.abc.Sequence[str]
     :param downscaled_paths: Matching downscaled stores.
@@ -368,7 +368,7 @@ def run(cfg, forecast_paths, downscaled_paths, out_dir, provider=None) -> dict:
     :param out_dir: Output directory.
     :type out_dir: str | pathlib.Path
     :param provider: Station provider; ``None`` builds the configured one.
-    :type provider: downscale.stations.StationProvider | None
+    :type provider: downscaler.data.stations.StationProvider | None
     :returns: Summary of the comparison, also written to ``summary.json``.
     :rtype: dict
     :raises FileNotFoundError: If a forecast has no matching downscaled store.

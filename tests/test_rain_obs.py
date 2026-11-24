@@ -6,9 +6,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from downscale import rain_metrics as metrics
-from downscale.evaluation import fair_crps
-from downscale.rain_obs import Aggregator, at_stations, choose_test_days, gauge_matrix, read_gauge_file, read_odim
+from downscaler.data.precipitation_observations import (
+    Aggregator,
+    at_stations,
+    choose_test_days,
+    gauge_matrix,
+    read_gauge_file,
+    read_odim,
+)
+from downscaler.evaluation import precipitation_metrics as metrics
+from downscaler.evaluation.ensemble_scores import fair_crps
 
 
 def blob(cx, cy=20, r=3, peak=10.0, size=40):

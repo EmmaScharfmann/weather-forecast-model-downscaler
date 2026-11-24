@@ -20,7 +20,7 @@ import pandas as pd
 import xarray as xr
 from matplotlib.colors import BoundaryNorm, ListedColormap
 
-from downscale.precipitation import check_pack
+from downscaler.models.precipitation import check_pack
 
 
 def make_movie(pairs, predictions, out, fps=2, gif=None, coastlines=True, comparison=None):

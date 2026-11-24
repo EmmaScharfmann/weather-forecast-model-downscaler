@@ -47,9 +47,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from downscale import hourly as hr
-from downscale.config import load_config
-from downscale.diagnostics import (
+from downscaler.config import load_config
+from downscaler.evaluation.diagnostics import (
     effective_resolution_km,
     grid_spacing_km,
     land_mask,
@@ -59,7 +58,8 @@ from downscale.diagnostics import (
     spectrum_figure,
     temporal_spectrum,
 )
-from downscale.downscaler import Downscaler
+from downscaler.models import hourly_temperature as hr
+from downscaler.models.temperature import Downscaler
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
