@@ -1,0 +1,51 @@
+# Four training years (2016-2019); wet 2020 validation days and wet 2022-2023 test days chosen from gauges.
+# Changes from config_precipitation_year.yaml: finer member noise, no ensemble-mean loss, more years.
+region:
+- 40.0
+- 53.0
+- -7.0
+- 11.0
+predictors:
+- tp
+- t2m
+- d2m
+- u10m
+- v10m
+- msl
+forecast_interval_hours: 6
+validation_start: '2020-01-01T01:00:00'
+static_path: data/precipitation/terrain.zarr
+evaluation_noise_seed: 2
+model:
+  base: 16
+  depth: 3
+  noise_factor: 2  # member noise at ~20 km instead of ~80 km, for small-scale structure
+  members: 4
+  temporal_context: false
+  architecture: joint
+  sequence_hours: 12
+  terrain: true
+training:
+  epochs: 15  # four times more data per epoch
+  batch_windows: 1
+  sequence_windows: 2
+  temporal_weight: 0.15
+  mean_loss_weight: 0.0  # an MSE on the ensemble mean rewards blurry members
+  feature_dtype: float16  # halves input memory; ample precision for standardised inputs
+  learning_rate: 5.0e-05
+  seed: 0
+  paired_noise: true
+  max_steps: null
+  init_checkpoint: /fsx/emma_scharfmann/.cache/huggingface/hub/models--EmmaScharfmann--france-precipitation-downscaler/snapshots/33bce9237bfe4e43e6bdd16e57cfc9ab07c74f09/model.pt
+  selection: joint
+  resume: true
+  checkpoint_every_steps: 100
+  patience: 5
+  min_epochs: 5
+annual:
+  years: [2016, 2017, 2018, 2019]
+  validation_year: 2020
+  validation_days: data/precipitation/obs_validation/days.json
+  test_year: 2022
+  test_days: data/precipitation/obs_test/days.json
+  download_workers: 4
