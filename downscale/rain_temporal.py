@@ -19,22 +19,32 @@ def segments(times, hours):
     return [slice(a * hours, b * hours) for a, b in zip(edges[:-1], edges[1:])]
 
 
-def hourly_baseline(ds):
+def hourly_baseline(ds, block_windows=744):
     """Differentiate monotone cumulative-rain interpolation into hourly depths.
 
     PCHIP has continuous first derivatives, preserves monotonicity and passes
     through every accumulation endpoint. Hourly depths remain nonnegative and
     sum to each original six-hour total. No rainfall observations are used.
+
+    Long segments are interpolated in blocks of ``block_windows`` windows. A
+    PCHIP slope only depends on the neighbouring intervals, so blocks padded by
+    two windows on each side give the same result as one pass, with memory
+    bounded by the block instead of the whole training period.
     """
     hours = int(ds.attrs["forecast_interval_hours"])
-    rain = ds.predictors.sel(variable="tp").values.astype("float64")
-    result = np.empty_like(rain, dtype="float32")
+    rain = ds.predictors.sel(variable="tp").values
+    result = np.empty(rain.shape, dtype="float32")
     for part in segments(ds.time.values, hours):
-        values = rain[part]
-        totals = values.reshape(-1, hours, *rain.shape[1:]).sum(1)
-        cumulative = np.concatenate([np.zeros_like(totals[:1]), totals.cumsum(0)])
-        interpolator = PchipInterpolator(np.arange(len(cumulative)) * hours, cumulative, axis=0, extrapolate=False)
-        result[part] = np.maximum(np.diff(interpolator(np.arange(len(values) + 1)), axis=0), 0)
+        windows = (part.stop - part.start) // hours
+        for a in range(0, windows, block_windows):
+            b = min(windows, a + block_windows)
+            lo, hi = max(0, a - 2), min(windows, b + 2)
+            values = rain[part.start + lo * hours:part.start + hi * hours].astype("float64")
+            totals = values.reshape(-1, hours, *rain.shape[1:]).sum(1)
+            cumulative = np.concatenate([np.zeros_like(totals[:1]), totals.cumsum(0)])
+            interpolator = PchipInterpolator(np.arange(len(cumulative)) * hours, cumulative, axis=0, extrapolate=False)
+            steps = np.arange((a - lo) * hours, (b - lo) * hours + 1)
+            result[part.start + a * hours:part.start + b * hours] = np.maximum(np.diff(interpolator(steps), axis=0), 0)
     return result
 
 

@@ -58,3 +58,20 @@ def test_feature_stack_matches_features_and_saves_memory():
     half = FeatureStack(ds, mean, std, static, "float16")
     assert half.data.nbytes * 2 == stack.data.nbytes
     assert np.allclose(half[index], reference[index], atol=5e-3)
+
+
+def test_blocked_hourly_baseline_matches_single_pass():
+    import numpy as np
+    import xarray as xr
+    from downscale.rain_temporal import hourly_baseline
+    rng = np.random.default_rng(1)
+    times = pd.DatetimeIndex(list(pd.date_range("2019-01-01T01:00", periods=6 * 23, freq="h"))
+                             + list(pd.date_range("2019-03-01T01:00", periods=6 * 5, freq="h")))
+    rain = (rng.gamma(0.4, 2, (len(times), 3, 4)) * (rng.random((len(times), 1, 1)) > 0.4)).astype("float32")
+    ds = xr.Dataset({"predictors": (("time", "variable", "lat", "lon"), rain[:, None])},
+                    coords={"time": times, "variable": ["tp"]}, attrs={"forecast_interval_hours": 6})
+    whole = hourly_baseline(ds, block_windows=10_000)
+    for block in (1, 2, 3, 7):
+        assert np.allclose(hourly_baseline(ds, block_windows=block), whole, atol=1e-5)
+    totals = whole[:6 * 23].reshape(23, 6, 3, 4).sum(1)
+    assert np.allclose(totals, rain[:6 * 23].reshape(23, 6, 3, 4).sum(1), atol=1e-4)
