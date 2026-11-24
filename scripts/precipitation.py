@@ -107,6 +107,7 @@ def train(ds, cfg, out, device):
         baseline[training] = hourly_baseline(ds.isel(time=training))
         baseline[validation] = hourly_baseline(ds.isel(time=validation))
     target = ds.target.values.astype("float32")
+    validation_rain = ds.predictors.isel(time=validation, variable=0).values.astype("float32")
     sequence_hours = window * settings.get("sequence_windows", 1)
     if model_cfg.architecture == "joint" and sequence_hours != model_cfg.sequence_hours:
         raise ValueError("joint training sequence length must match the model")
@@ -197,7 +198,7 @@ def train(ds, cfg, out, device):
                "optimizer_steps": len(losses)}
         selection = metrics["crps_mm"]
         if settings.get("selection") == "joint":
-            temporal = temporal_scores(pred, target[validation], ds.predictors.values[validation, 0], baseline[validation], ds.time.values[validation], window)
+            temporal = temporal_scores(pred, target[validation], validation_rain, baseline[validation], ds.time.values[validation], window)
             selection = metrics["ensemble_crps_mm"] + .1 * metrics["rmse_mm"] + .1 * temporal["increment_crps_mm"]
             row.update(validation_selection=selection, validation_rmse_mm=metrics["rmse_mm"],
                        validation_increment_crps_mm=temporal["increment_crps_mm"],
@@ -214,12 +215,12 @@ def train(ds, cfg, out, device):
                       "selected_epoch": epoch + 1, "selection_score": selection,
                       "train_hours": len(training), "validation_hours": len(validation),
                       "validation_start": str(ds.time.values[validation[0]]), "config": cfg,
-                      "model": metrics, "baseline": score(ds.predictors.values[validation, :1], target[validation]),
+                      "model": metrics, "baseline": score(validation_rain[:, None], target[validation]),
                       "hourly_reference_baseline": score(baseline[validation, None], target[validation])}
             # Coherent accumulated samples, retaining the member identity across hours.
             p6 = pred.reshape(-1, window, *pred.shape[1:]).sum(1)
             t6 = target[validation].reshape(-1, window, *target.shape[1:]).sum(1)
-            b6 = ds.predictors.values[validation, 0].reshape(-1, window, *target.shape[1:]).sum(1)[:, None]
+            b6 = validation_rain.reshape(-1, window, *target.shape[1:]).sum(1)[:, None]
             report["window_accumulation"] = {"hours": window, "model": score(p6, t6), "baseline": score(b6, t6)}
             (out / "evaluation.json").write_text(json.dumps(report, indent=2) + "\n")
         atomic_json(out / "history.json", history)
