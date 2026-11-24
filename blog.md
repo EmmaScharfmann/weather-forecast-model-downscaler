@@ -399,7 +399,7 @@ You can run more forecast and evaluation against observations on our [demo space
 
 ## Training the downscaler over France on temperature
 
-You can train your own downscaler (you can change the data, resolution, variable, region...) following what we did to train our own downscaler. I will walk you through the main steps in this blog, but you can find a complete tutorial [here](https://github.com/EmmaScharfmann/weather-forecast-model-downscaler/blob/main/training_tutorial.ipynb). 
+You can train your own downscaler (you can change the data, resolution, variable, region...) following what we did to train our own downscaler. I will walk you through the main steps in this blog, but you can find a complete tutorial [here](https://github.com/EmmaScharfmann/weather-forecast-model-downscaler/blob/main/tutorials/training.ipynb). 
 
 0. Set up
 

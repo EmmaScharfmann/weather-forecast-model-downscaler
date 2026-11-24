@@ -1,5 +1,5 @@
 # Four training years (2016-2019); wet 2020 validation days and wet 2022-2023 test days chosen from gauges.
-# Changes from config_precipitation_year.yaml: finer member noise, no ensemble-mean loss, more years.
+# Changes from configs/precipitation_year.yaml: finer member noise, no ensemble-mean loss, more years.
 region:
 - 40.0
 - 53.0

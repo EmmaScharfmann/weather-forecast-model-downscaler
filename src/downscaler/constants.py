@@ -1,6 +1,6 @@
 """Fixed values shared across the downscaling pipeline.
 
-Anything a user may want to change per experiment belongs in ``config_spatial.yaml``
+Anything a user may want to change per experiment belongs in ``configs/spatial.yaml``
 instead; this module holds physical constants, schema names and presets.
 """
 

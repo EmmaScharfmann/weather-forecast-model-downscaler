@@ -289,7 +289,7 @@ def evaluate_once(command, model, pairs, output, fingerprint):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="config_precipitation_year.yaml")
+    parser.add_argument("--config", default="configs/precipitation_year.yaml")
     parser.add_argument("--cache", default="data/precipitation/year_2019")
     parser.add_argument("--out", default="runs/precipitation_year")
     parser.add_argument("--outputs", default="outputs/precipitation_year")

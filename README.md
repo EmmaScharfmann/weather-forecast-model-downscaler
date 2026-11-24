@@ -21,26 +21,26 @@ uv run hf auth login             # model and datasets on the Hugging Face Hub
 ```
 
 AIFS-ENS comes from the [Earthmover marketplace](https://app.earthmover.io/marketplace/6a10729e8a69e6bcaeae0f90).
-Subscribing creates a repository under your organisation; set `forecasts.source` in `config_spatial.yaml` to it.
+Subscribing creates a repository under your organisation; set `forecasts.source` in `configs/spatial.yaml` to it.
 
 ## Tutorial
 
-`tutorial_inference.ipynb` fetches an AIFS-ENS run, applies the published downscaler
+`tutorials/inference.ipynb` fetches an AIFS-ENS run, applies the published downscaler
 ([EmmaScharfmann/france-temperature-downscaler](https://huggingface.co/EmmaScharfmann/france-temperature-downscaler)),
 maps both forecasts, and evaluates them against CERRA, CERRA's own floor and Météo-France stations.
 
-`training_tutorial.ipynb` trains the downscaler from scratch: it pairs ERA5 from Earthmover with CERRA
+`tutorials/training.ipynb` trains the downscaler from scratch: it pairs ERA5 from Earthmover with CERRA
 from the Hub, trains on 2014 to 2019, scores the model on 2020 against interpolation, and saves a
-checkpoint that `tutorial_inference.ipynb` can load.
+checkpoint that `tutorials/inference.ipynb` can load.
 
-`tutorial_temporal.ipynb` fills the hours between AIFS-ENS's 6-hourly steps with the hourly model
+`tutorials/temporal.ipynb` fills the hours between AIFS-ENS's 6-hourly steps with the hourly model
 ([kashif/france-temperature-hourly-downscaler](https://huggingface.co/kashif/france-temperature-hourly-downscaler)),
 reading the forecast from ECMWF's open data, and scores it hour by hour against the stations.
 
 ## Configuration
 
-`config_spatial.yaml` configures the spatial downscaler and everything shared (region, paths, stations,
-evaluation). `config_temporal.yaml` starts with `extends: config_spatial.yaml` and lists only what the
+`configs/spatial.yaml` configures the spatial downscaler and everything shared (region, paths, stations,
+evaluation). `configs/temporal.yaml` starts with `extends: configs/spatial.yaml` and lists only what the
 hourly model changes, plus its own `temporal` section, so the two files show what is common and what is
 specific. Every script takes `--config`; command-line flags override it.
 
@@ -58,7 +58,7 @@ specific. Every script takes `--config`; command-line flags override it.
 | Score both against stations | `scripts/eval_downscaled.py` |
 | Publish the model or datasets to the Hub | `scripts/publish.py` |
 
-For hourly output between the 6-hourly steps, every script takes `--config config_temporal.yaml`:
+For hourly output between the 6-hourly steps, every script takes `--config configs/temporal.yaml`:
 
 | Step | Script |
 |---|---|
@@ -95,7 +95,7 @@ reads IFS ENS (or `ifs`, `aifs-single`) from the same open data.
 
 ## Hourly precipitation
 
-`config_precipitation.yaml` and `scripts/precipitation.py` implement a separate regional
+`configs/precipitation.yaml` and `scripts/precipitation.py` implement a separate regional
 rainfall prototype: **global forecast forcing → hourly probabilistic rainfall over France**.
 The initial target is PARDIG-NRT at 0.1° (roughly 8 km east–west × 11 km north–south
 over France). The bounding box includes France and surrounding countries and sea;
@@ -221,7 +221,7 @@ are data-dependent.
 
 ### Cross-year training, test evaluation and movie
 
-`config_precipitation_experiment.yaml` records the completed small experiment:
+`configs/precipitation_experiment.yaml` records the completed small experiment:
 96 training hours from 21–24 November 2019, 24 validation hours from 2 October
 2020, and 24 untouched test hours from 3 October 2021 (all right-labelled UTC).
 The fresh model trained for 30 epochs / 480 optimizer steps on Apple MPS, using
@@ -260,9 +260,9 @@ exclude an eight-cell context ring for an interior comparison.
 For the cached training/validation pack and separate test pack:
 
 ```bash
-uv run python scripts/precipitation.py --config config_precipitation_experiment.yaml train \
+uv run python scripts/precipitation.py --config configs/precipitation_experiment.yaml train \
   --pairs data/precipitation/train_validation.zarr --out runs/precipitation_cross_year
-uv run python scripts/precipitation.py --config config_precipitation_experiment.yaml evaluate \
+uv run python scripts/precipitation.py --config configs/precipitation_experiment.yaml evaluate \
   --model runs/precipitation_cross_year/model.pt \
   --pairs data/precipitation/test_2021.zarr --out outputs/precipitation_cross_year/test
 uv run python scripts/movie_precipitation.py \
@@ -289,7 +289,7 @@ The 24-frame, 12-second test animation is available as a
 
 ### Global forecast forcing and Earth2Studio
 
-For the newer joint temporal decoder, use `config_precipitation_joint.yaml` as
+For the newer joint temporal decoder, use `configs/precipitation_joint.yaml` as
 described under [Joint space-time decoder](#joint-space-time-decoder).
 The original and continuous-path experiment configurations are retained for comparison.
 
@@ -374,9 +374,9 @@ not post-processed with a temporal smoothing filter. This remains a regional
 hour-conditioned U-Net, rather than a full spatiotemporal storm-dynamics model.
 
 ```bash
-uv run python scripts/precipitation.py --config config_precipitation_continuous.yaml train \
+uv run python scripts/precipitation.py --config configs/precipitation_continuous.yaml train \
   --pairs data/precipitation/train_validation.zarr --out runs/precipitation_continuous_v2
-uv run python scripts/precipitation.py --config config_precipitation_continuous.yaml evaluate \
+uv run python scripts/precipitation.py --config configs/precipitation_continuous.yaml evaluate \
   --model runs/precipitation_continuous_v2/model.pt --pairs data/precipitation/test_2021.zarr \
   --out outputs/precipitation_continuous_v2/test
 uv run python scripts/movie_precipitation.py \
@@ -415,7 +415,7 @@ lives under `runs/precipitation_continuous_v2/` in the completed local experimen
 
 ### Joint space-time decoder
 
-`config_precipitation_joint.yaml` tests another approach to the accuracy/continuity
+`configs/precipitation_joint.yaml` tests another approach to the accuracy/continuity
 tradeoff. It retains the original model's coarse totals, endpoint states and spatial
 weights, and **jointly decodes twelve hourly fields**. Trainable temporal 3D
 convolutions couple the hours at every encoder/decoder scale. They start at zero
@@ -491,9 +491,9 @@ uv run python scripts/precipitation.py fetch --start 2019-06-10T01:00 --end 2019
 uv run python scripts/precipitation.py fetch --start 2024-05-16T01:00 --end 2024-05-17T00:00 \
   --out data/precipitation/test_2024.zarr
 # Concatenate summer, autumn and validation packs as expanded_train_validation.zarr.
-uv run python scripts/precipitation.py --config config_precipitation_joint.yaml train \
+uv run python scripts/precipitation.py --config configs/precipitation_joint.yaml train \
   --pairs data/precipitation/expanded_train_validation.zarr --out runs/precipitation_joint
-uv run python scripts/precipitation.py --config config_precipitation_joint.yaml evaluate \
+uv run python scripts/precipitation.py --config configs/precipitation_joint.yaml evaluate \
   --model runs/precipitation_joint/model.pt --pairs data/precipitation/test_2024.zarr \
   --out outputs/precipitation_joint/test_2024
 ```
@@ -504,7 +504,7 @@ and continuous-path checkpoints remain supported.
 
 ### Static terrain covariates
 
-`config_precipitation_terrain.yaml` adds eight time-invariant input channels to
+`configs/precipitation_terrain.yaml` adds eight time-invariant input channels to
 the joint decoder. They are appended after the geographical/calendar inputs and
 before the stochastic noise channel. All hours and ensemble members use the
 same static maps.
@@ -543,9 +543,9 @@ requires no separate terrain file and rejects a different forecast grid.
 uv run python scripts/precipitation.py terrain \
   --grid data/precipitation/expanded_train_validation.zarr \
   --cerra data/cerra_hourly/static.zarr --out data/precipitation/terrain.zarr
-uv run python scripts/precipitation.py --config config_precipitation_terrain.yaml train \
+uv run python scripts/precipitation.py --config configs/precipitation_terrain.yaml train \
   --pairs data/precipitation/expanded_train_validation.zarr --out runs/precipitation_terrain
-uv run python scripts/precipitation.py --config config_precipitation_terrain.yaml evaluate \
+uv run python scripts/precipitation.py --config configs/precipitation_terrain.yaml evaluate \
   --model runs/precipitation_terrain/model.pt --pairs data/precipitation/test_2024.zarr \
   --out outputs/precipitation_terrain/terrain_2024
 ```
@@ -601,7 +601,7 @@ PARDIG agreement and independent observation skill must be reported separately.
 
 ### Full-year rainfall training
 
-`config_precipitation_year.yaml` expands the terrain model to **all 8,760 hourly
+`configs/precipitation_year.yaml` expands the terrain model to **all 8,760 hourly
 intervals in 2019**, including dry weather. Validation uses the 15th day of every
 month in 2020 (288 hours); test uses January/April/July/October 15 in 2022 (96
 hours). These periods are fixed before fitting. Output remains hourly at 0.1°.

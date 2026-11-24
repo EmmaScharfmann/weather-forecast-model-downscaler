@@ -62,10 +62,10 @@ def test_unknown_region_name_raises(config_file):
 
 
 def test_shipped_configs_parse_and_the_temporal_one_changes_only_what_it_lists():
-    spatial, temporal = load_config("config_spatial.yaml"), load_config("config_temporal.yaml")
+    spatial, temporal = load_config("configs/spatial.yaml"), load_config("configs/temporal.yaml")
     assert isinstance(spatial, Config) and spatial.training.loss in ("crps", "mse")
-    listed = yaml.safe_load(open("config_temporal.yaml"))
-    assert listed.pop("extends") == "config_spatial.yaml"
+    listed = yaml.safe_load(open("configs/temporal.yaml"))
+    assert listed.pop("extends") == "spatial.yaml"
     for section in ("region", "paths", "target", "coarse", "training", "stations", "evaluation"):
         for key, value in vars(getattr(spatial, section)).items():
             expected = listed.get(section, {}).get(key, value)

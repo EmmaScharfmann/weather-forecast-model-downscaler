@@ -2,9 +2,9 @@
 
 Usage::
 
-    python scripts/train_downscaler.py --config config_spatial.yaml --out runs/crps
-    python scripts/train_downscaler.py --config config_spatial.yaml --out runs/mse --loss mse
-    python scripts/train_downscaler.py --config config_temporal.yaml --temporal --out runs/hourly
+    python scripts/train_downscaler.py --config configs/spatial.yaml --out runs/crps
+    python scripts/train_downscaler.py --config configs/spatial.yaml --out runs/mse --loss mse
+    python scripts/train_downscaler.py --config configs/temporal.yaml --temporal --out runs/hourly
 
 Validation scores are in kelvin against the target reanalysis: the root mean
 squared error of the ensemble mean, the fair continuous ranked probability
@@ -12,7 +12,7 @@ score, and the spread-skill ratio, which is one when the ensemble spread
 matches its error.
 
 ``--temporal`` trains the model that fills the hours between 6-hourly coarse steps. Its pairs must
-be hourly: build them with ``build_pairs.py`` from a target downloaded with ``config_temporal.yaml``.
+be hourly: build them with ``build_pairs.py`` from a target downloaded with ``configs/temporal.yaml``.
 Every hour is given the coarse fields at the two ends of its 6-hour window (00, 06, 12 and 18 UTC),
 so only the coarse steps a forecast actually has are used. The network starts from the spatial
 model's weights (``temporal.spatial_model``) with its two new channels switched off, so before

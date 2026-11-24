@@ -2,7 +2,7 @@
 
 Usage::
 
-    python scripts/fetch_forecasts.py --config config_spatial.yaml --start 2025-08-01 --end 2025-08-31
+    python scripts/fetch_forecasts.py --config configs/spatial.yaml --start 2025-08-01 --end 2025-08-31
 
 Every initialisation between ``--start`` and ``--end`` at the configured hours is
 read from the archive in ``forecasts.source`` and written to ``paths.forecasts`` as

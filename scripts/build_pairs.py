@@ -6,8 +6,8 @@ input and the baseline it has to beat.
 
 Usage::
 
-    python scripts/build_pairs.py --config config_spatial.yaml
-    python scripts/build_pairs.py --config config_spatial.yaml --consolidate
+    python scripts/build_pairs.py --config configs/spatial.yaml
+    python scripts/build_pairs.py --config configs/spatial.yaml --consolidate
 
 Months whose target file is not downloaded yet are reported as pending, so this
 can run alongside the download.

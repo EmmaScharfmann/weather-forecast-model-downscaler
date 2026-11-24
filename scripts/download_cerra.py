@@ -5,14 +5,14 @@ Requires a Copernicus Climate Data Store account, credentials in
 
 Usage::
 
-    python scripts/download_cerra.py --config config_spatial.yaml
-    python scripts/download_cerra.py --config config_spatial.yaml --consolidate
-    python scripts/download_cerra.py --config config_temporal.yaml
+    python scripts/download_cerra.py --config configs/spatial.yaml
+    python scripts/download_cerra.py --config configs/spatial.yaml --consolidate
+    python scripts/download_cerra.py --config configs/temporal.yaml
 
 One request is issued per month and each month is written to its own store, so
 rerunning the command resumes an interrupted download.
 
-``target.hourly`` (set in ``config_temporal.yaml``, or ``--hourly``) fetches every hour
+``target.hourly`` (set in ``configs/temporal.yaml``, or ``--hourly``) fetches every hour
 instead of ``target.times``: CERRA analyses exist at ``temporal.analysis_times``, every
 three hours, so the hours after each come from its ``temporal.forecast_leads`` forecasts.
 ``target.periods`` restricts the download to ranges of days; ``--start`` and ``--end``

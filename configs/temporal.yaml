@@ -1,19 +1,19 @@
 # Configuration for the temporal (hourly) downscaler.
 #
-# It takes everything from config_spatial.yaml and lists only what the hourly model changes, so the
-# two files show what is shared and what is specific. Scripts read it with --config config_temporal.yaml
+# It takes everything from configs/spatial.yaml and lists only what the hourly model changes, so the
+# two files show what is shared and what is specific. Scripts read it with --config configs/temporal.yaml
 # and, as before, command-line flags override the values set here.
 #
 # The published hourly model was trained in two stages, both with this file:
 #
 #   1. from the spatial model, plain CRPS, with the schedule below; the best epoch (8, val CRPS 0.622 K)
 #      is kept, and the run was stopped at epoch 22 once it had clearly started to overfit:
-#        train_downscaler.py --config config_temporal.yaml --temporal --out runs/hourly
+#        train_downscaler.py --config configs/temporal.yaml --temporal --out runs/hourly
 #   2. continued with CRPS on block averages too, 6 epochs at 3e-4:
-#        train_downscaler.py --config config_temporal.yaml --temporal --init-hourly runs/hourly/model.pt \
+#        train_downscaler.py --config configs/temporal.yaml --temporal --init-hourly runs/hourly/model.pt \
 #            --multiscale 2 4 8 16 --epochs 6 --learning-rate 3e-4 --out runs/hourly_ms
 
-extends: config_spatial.yaml
+extends: spatial.yaml
 
 paths:
   target: data/cerra_hourly     # hourly CERRA from download_cerra.py

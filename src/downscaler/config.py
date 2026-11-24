@@ -1,7 +1,7 @@
 """Typed access to the YAML configuration.
 
-``config_spatial.yaml`` configures the spatial downscaler and everything shared. ``config_temporal.yaml``
-starts with ``extends: config_spatial.yaml`` and lists only what the hourly (temporal) downscaler changes,
+``configs/spatial.yaml`` configures the spatial downscaler and everything shared. ``configs/temporal.yaml``
+starts with ``extends: configs/spatial.yaml`` and lists only what the hourly (temporal) downscaler changes,
 plus its own ``temporal`` section, so a diff of the two files is exactly what is specific to it.
 """
 
@@ -16,7 +16,7 @@ import yaml
 from downscaler.constants import REGION_PRESETS
 
 
-DEFAULT_CONFIG_PATH = Path("config_spatial.yaml")
+DEFAULT_CONFIG_PATH = Path("configs/spatial.yaml")
 #: Times of CERRA's three-hourly analyses.
 CERRA_ANALYSIS_TIMES = [f"{h:02d}:00" for h in range(0, 24, 3)]
 Region = tuple[float, float, float, float]
@@ -272,7 +272,7 @@ def _merge(base: dict, raw: dict) -> dict:
 def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
     """Load the pipeline configuration.
 
-    :param path: Path to a YAML file; ``None`` uses ``config_spatial.yaml`` if present, else defaults. A file
+    :param path: Path to a YAML file; ``None`` uses ``configs/spatial.yaml`` if present, else defaults. A file
         may name another in ``extends``, relative to itself, and then holds only what it changes.
     :type path: str | pathlib.Path | None
     :param overrides: Section names mapped to dictionaries of values replacing the file's.

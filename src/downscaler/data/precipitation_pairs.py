@@ -11,8 +11,8 @@ import pandas as pd
 import xarray as xr
 
 from downscaler.constants import REGION_PRESETS
-from downscaler.data.regions import crop_indices, to_signed_lon
 from downscaler.data.coarse_sources import ERA5_ARCO
+from downscaler.data.regions import crop_indices, to_signed_lon
 
 
 PARDIG_NRT = "gs://pardig_1/NRT/zarr/2016_to_2025/predictions.zarr"

@@ -342,7 +342,7 @@ def train(ds, cfg, out, device):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="config_precipitation.yaml")
+    parser.add_argument("--config", default="configs/precipitation.yaml")
     sub = parser.add_subparsers(dest="command", required=True)
     terrain = sub.add_parser("terrain", help="prepare static covariates once on the rainfall grid")
     terrain.add_argument("--grid", required=True, help="rainfall pair/forcing Zarr supplying target lat/lon")

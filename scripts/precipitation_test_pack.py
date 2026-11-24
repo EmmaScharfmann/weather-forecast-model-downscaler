@@ -100,7 +100,7 @@ def main():
         default="hf://EmmaScharfmann/france-precipitation-downscaler/model.pt",
         help="checkpoint whose grid the pack uses (path or hf://)",
     )
-    b.add_argument("--config", default="config_precipitation_year.yaml")
+    b.add_argument("--config", default="configs/precipitation_year.yaml")
     b.add_argument("--cache", default="data/precipitation/obs_test")
     b.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()

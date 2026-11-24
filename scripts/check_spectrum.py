@@ -2,8 +2,8 @@
 
 Usage::
 
-    python scripts/check_spectrum.py --config config_spatial.yaml --model runs/crps/model.pt
-    python scripts/check_spectrum.py --config config_temporal.yaml --model runs/spatial/model.pt \\
+    python scripts/check_spectrum.py --config configs/spatial.yaml --model runs/crps/model.pt
+    python scripts/check_spectrum.py --config configs/temporal.yaml --model runs/spatial/model.pt \\
         --hourly runs/hourly/model.pt
 
 Answers whether the model adds detail at the scales the target actually has.
