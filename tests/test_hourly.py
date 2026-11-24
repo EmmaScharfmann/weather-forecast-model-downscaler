@@ -5,6 +5,7 @@ import json
 import numpy as np
 import pytest
 
+
 torch = pytest.importorskip("torch", reason="torch is installed with requirements/downscaler.txt")
 
 from downscale import downscaler as dsc  # noqa: E402
@@ -97,8 +98,11 @@ def test_checkpoint_round_trip_and_the_spatial_checkpoint_is_refused(tmp_path, s
     c0, c1 = np.full((2, height, width), 285.0, "f4"), np.full((2, height, width), 291.0, "f4")
     times = np.array(["2020-07-01T00", "2020-07-01T03"], "datetime64[ns]")
     offsets = np.array([0, 3])
-    assert np.allclose(restored.predict_hours(c0, c1, offsets, times, members=1),
-                       model.predict_hours(c0, c1, offsets, times, members=1), atol=1e-5)
+    assert np.allclose(
+        restored.predict_hours(c0, c1, offsets, times, members=1),
+        model.predict_hours(c0, c1, offsets, times, members=1),
+        atol=1e-5,
+    )
     spatial_model(static_fields, hourly_stats).save(tmp_path / "spatial.pt")
     with pytest.raises(ValueError, match="channels"):
         hourly.HourlyDownscaler.load(tmp_path / "spatial.pt", device="cpu")
@@ -150,11 +154,29 @@ def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_p
         coords={"time": times.astype("datetime64[ns]")},
     ).to_zarr(pairs / "pairs.zarr")
     out = tmp_path / "run"
-    status = train_downscaler.main([
-        "--temporal", "--pairs", str(pairs), "--spatial", str(tmp_path / "spatial.pt"), "--out", str(out),
-        "--epochs", "1", "--max-steps-per-epoch", "2", "--batch-size", "4", "--eval-members", "2",
-        "--val-start", "2020-07-04", "--device", "cpu",
-    ])
+    status = train_downscaler.main(
+        [
+            "--temporal",
+            "--pairs",
+            str(pairs),
+            "--spatial",
+            str(tmp_path / "spatial.pt"),
+            "--out",
+            str(out),
+            "--epochs",
+            "1",
+            "--max-steps-per-epoch",
+            "2",
+            "--batch-size",
+            "4",
+            "--eval-members",
+            "2",
+            "--val-start",
+            "2020-07-04",
+            "--device",
+            "cpu",
+        ]
+    )
     assert status == 0
     report = json.loads((out / "val_report.json").read_text())
     assert set(report) >= {"line", "spatial", "hourly"}
@@ -164,12 +186,34 @@ def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_p
     assert restored.stats["tendency"]["std"] > 0
 
     tuned = tmp_path / "tuned"
-    status = train_downscaler.main([
-        "--temporal", "--pairs", str(pairs), "--spatial", str(tmp_path / "spatial.pt"), "--out", str(tuned),
-        "--init-hourly", str(out / "model.pt"), "--multiscale", "2", "4",
-        "--epochs", "1", "--max-steps-per-epoch", "2", "--batch-size", "4", "--eval-members", "2",
-        "--val-start", "2020-07-04", "--device", "cpu",
-    ])
+    status = train_downscaler.main(
+        [
+            "--temporal",
+            "--pairs",
+            str(pairs),
+            "--spatial",
+            str(tmp_path / "spatial.pt"),
+            "--out",
+            str(tuned),
+            "--init-hourly",
+            str(out / "model.pt"),
+            "--multiscale",
+            "2",
+            "4",
+            "--epochs",
+            "1",
+            "--max-steps-per-epoch",
+            "2",
+            "--batch-size",
+            "4",
+            "--eval-members",
+            "2",
+            "--val-start",
+            "2020-07-04",
+            "--device",
+            "cpu",
+        ]
+    )
     assert status == 0
     checkpoint = hourly.safe_load(tuned / "model.pt")
     assert checkpoint["extra"]["multiscale"] == [2, 4]
@@ -177,10 +221,22 @@ def test_training_script_runs_and_scores_the_three_ways_of_filling_an_hour(tmp_p
 
     import check_spectrum
 
-    status = check_spectrum.main([
-        "--pairs", str(pairs), "--hourly", str(out / "model.pt"), "--model", str(tmp_path / "spatial.pt"),
-        "--val-start", "2020-07-04", "--members", "2", "--device", "cpu",
-    ])
+    status = check_spectrum.main(
+        [
+            "--pairs",
+            str(pairs),
+            "--hourly",
+            str(out / "model.pt"),
+            "--model",
+            str(tmp_path / "spatial.pt"),
+            "--val-start",
+            "2020-07-04",
+            "--members",
+            "2",
+            "--device",
+            "cpu",
+        ]
+    )
     assert status == 0
     summary = json.loads((out / "hourly_spectrum.json").read_text())
     assert summary["hours"] == 24
@@ -199,6 +255,7 @@ def test_temporal_spectrum_sees_noise_redrawn_every_hour():
     daily = spectrum.iloc[(spectrum.period_h - 24).abs().argmin()]
     assert daily.noisy == pytest.approx(daily.target, rel=0.2)
 
-    times = np.array(["2020-01-01T00", "2020-01-01T01", "2020-01-01T05", "2020-01-01T06", "2020-01-01T07"],
-                     "datetime64[h]")
+    times = np.array(
+        ["2020-01-01T00", "2020-01-01T01", "2020-01-01T05", "2020-01-01T06", "2020-01-01T07"], "datetime64[h]"
+    )
     assert longest_run(times) == slice(2, 5)

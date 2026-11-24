@@ -23,6 +23,7 @@ import torch
 from .constants import TIME_CHANNELS, channels
 from .downscaler import Config, Downscaler, DownscalerNet, time_features, to_kelvin
 
+
 if TYPE_CHECKING:
     import xarray as xr
 
@@ -70,7 +71,7 @@ class HourlyNet(DownscalerNet):
         if self.cfg.stochastic:
             noise = self._noise(batch * m, height, width, x.device) if noise is None else noise
             x = torch.cat([x, noise], 1)
-        multiple = 2 ** self.cfg.depth
+        multiple = 2**self.cfg.depth
         pad_h, pad_w = (-height) % multiple, (-width) % multiple
         if pad_h or pad_w:
             x = F.pad(x, (0, pad_w, 0, pad_h), mode="replicate")
@@ -168,7 +169,9 @@ def safe_load(path) -> dict:
     allowed = [
         (reconstruct, "numpy.core.multiarray._reconstruct"),
         (reconstruct, "numpy._core.multiarray._reconstruct"),
-        np.ndarray, np.dtype, *dtypes,
+        np.ndarray,
+        np.dtype,
+        *dtypes,
     ]
     with torch.serialization.safe_globals(allowed):
         return torch.load(path, map_location="cpu", weights_only=True)
@@ -230,7 +233,7 @@ def offsets_of(times) -> np.ndarray:
     return ((t - t.astype("datetime64[D]")) / np.timedelta64(1, "h")).astype(int) % WINDOW_HOURS
 
 
-def hourly_leads(forecast: "xr.DataArray", step_hours: int = 1) -> "xr.DataArray":
+def hourly_leads(forecast: xr.DataArray, step_hours: int = 1) -> xr.DataArray:
     """Interpolate a forecast in time onto every hour between its first and last lead times.
 
     :param forecast: Forecast with a ``lead_time`` dimension.
@@ -267,7 +270,7 @@ def init_from_spatial(net: HourlyNet, spatial_checkpoint: str) -> None:
         elif name == "unet.inc.net.0.weight":
             rebuilt = torch.zeros_like(target[name])
             rebuilt[:, :n_spatial] = weight[:, :n_spatial]
-            rebuilt[:, n_spatial + len(EXTRA_CHANNELS):] = weight[:, n_spatial:]
+            rebuilt[:, n_spatial + len(EXTRA_CHANNELS) :] = weight[:, n_spatial:]
             target[name] = rebuilt
         else:
             raise ValueError(f"cannot initialise {name}: {tuple(weight.shape)} against {tuple(target[name].shape)}")
@@ -278,7 +281,7 @@ class HourlyDownscaler(Downscaler):
     """A trained hourly model together with everything inference needs."""
 
     @classmethod
-    def load(cls, path, device: str | None = None) -> "HourlyDownscaler":
+    def load(cls, path, device: str | None = None) -> HourlyDownscaler:
         """Read a checkpoint written by :meth:`~downscale.downscaler.Downscaler.save`.
 
         :param path: Checkpoint file.
@@ -301,8 +304,15 @@ class HourlyDownscaler(Downscaler):
 
     @torch.no_grad()
     def predict_hours(
-        self, c0: np.ndarray, c1: np.ndarray, offset_hours: np.ndarray, valid_times, members: int = 4,
-        batch: int = 8, noise: np.ndarray | None = None, seed: int = 0,
+        self,
+        c0: np.ndarray,
+        c1: np.ndarray,
+        offset_hours: np.ndarray,
+        valid_times,
+        members: int = 4,
+        batch: int = 8,
+        noise: np.ndarray | None = None,
+        seed: int = 0,
     ) -> np.ndarray:
         """Fine fields at some hours inside coarse windows.
 
@@ -339,11 +349,15 @@ class HourlyDownscaler(Downscaler):
         offsets = np.asarray(offset_hours)
         for i in range(0, len(c0), batch):
             sl = slice(i, i + batch)
-            x, baseline = make_hourly_inputs(c0[sl], c1[sl], offsets[sl], np.asarray(valid_times)[sl],
-                                             self.static_norm, self.stats)
+            x, baseline = make_hourly_inputs(
+                c0[sl], c1[sl], offsets[sl], np.asarray(valid_times)[sl], self.static_norm, self.stats
+            )
             x = torch.from_numpy(x).to(self.device)
-            batch_noise = None if shared is None else shared[None].expand(x.shape[0], *shared.shape).reshape(
-                x.shape[0] * n_members, *shared.shape[1:])
+            batch_noise = (
+                None
+                if shared is None
+                else shared[None].expand(x.shape[0], *shared.shape).reshape(x.shape[0] * n_members, *shared.shape[1:])
+            )
             pred = self.net(x, n_members, noise=batch_noise).cpu().numpy()
             out.append(to_kelvin(baseline, pred, self.stats).astype("f4"))
         return np.concatenate(out, 0)

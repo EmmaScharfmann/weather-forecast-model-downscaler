@@ -21,8 +21,8 @@ import json
 import logging
 import shutil
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import xarray as xr
 
@@ -36,11 +36,29 @@ from downscale.publish import (
     target_card,
 )
 
+
 logger = logging.getLogger("publish")
-MODEL_EXTRAS = ["val_report.json", "history.json", "curves.png", "val_maps.png", "spectrum.png",
-                "spectrum.json", "floor.png", "floor.json", "coast_transect.png"]
-EVAL_EXTRAS = ["summary.json", "scorecard.png", "improvement.png", "station_errors.png",
-               "quantiles.png", "heatwave_map.png", "by_lead.csv", "gain_by_elevation.csv"]
+MODEL_EXTRAS = [
+    "val_report.json",
+    "history.json",
+    "curves.png",
+    "val_maps.png",
+    "spectrum.png",
+    "spectrum.json",
+    "floor.png",
+    "floor.json",
+    "coast_transect.png",
+]
+EVAL_EXTRAS = [
+    "summary.json",
+    "scorecard.png",
+    "improvement.png",
+    "station_errors.png",
+    "quantiles.png",
+    "heatwave_map.png",
+    "by_lead.csv",
+    "gain_by_elevation.csv",
+]
 
 
 def folder_size_mb(folder: Path) -> float:
@@ -81,13 +99,19 @@ def build_model(args, cfg) -> Path:
 
     artefacts = ModelArtefacts.load(run, evaluation)
     card = model_card(
-        artefacts, args.repo, args.dataset_repo, args.region, args.target_name,
-        args.coarse_name, args.forecast_repo,
+        artefacts,
+        args.repo,
+        args.dataset_repo,
+        args.region,
+        args.target_name,
+        args.coarse_name,
+        args.forecast_repo,
     )
     (out / "README.md").write_text(card)
     (out / "LICENSE").write_text(LICENSE_TEXT)
-    logger.info("model folder: %s (%.1f MB, %d report file(s))", out, folder_size_mb(out),
-                len(list(reports.iterdir())))
+    logger.info(
+        "model folder: %s (%.1f MB, %d report file(s))", out, folder_size_mb(out), len(list(reports.iterdir()))
+    )
     return out
 
 
@@ -194,7 +218,6 @@ def build_target(args, cfg) -> Path:
         "grid_shape": [int(data.sizes["y"]), int(data.sizes["x"])],
         "spacing_km": round(grid_spacing_km(static.lat.values, static.lon.values), 2),
         "region": list(cfg.region_box),
-        "dataset": cfg.target.dataset,
         "size_mb": round(folder_size_mb(out), 1),
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
@@ -224,23 +247,32 @@ def build_stations(args, cfg, provider=None) -> Path:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     stations, report = load_stations(
-        provider, cfg.region_box, args.start, args.end, variables=cfg.stations.variables,
+        provider,
+        cfg.region_box,
+        args.start,
+        args.end,
+        variables=cfg.stations.variables,
         cache_dir=args.cache or cfg.paths.stations_cache,
         qc=QCConfig(min_completeness=cfg.stations.min_completeness, primary=cfg.stations.variables[0]),
         holdout_frac=cfg.stations.holdout_frac,
     )
-    metadata = pd.DataFrame({
-        "station_id": stations.station.values.astype(str),
-        "name": stations["name"].values.astype(str),
-        "latitude": stations.latitude.values,
-        "longitude": stations.longitude.values,
-        "elevation_m": stations.elevation.values,
-        "holdout": stations.holdout.values.astype(bool),
-    })
+    metadata = pd.DataFrame(
+        {
+            "station_id": stations.station.values.astype(str),
+            "name": stations["name"].values.astype(str),
+            "latitude": stations.latitude.values,
+            "longitude": stations.longitude.values,
+            "elevation_m": stations.elevation.values,
+            "holdout": stations.holdout.values.astype(bool),
+        }
+    )
     metadata.to_parquet(out / "metadata.parquet", index=False)
     variables = [v for v in stations.data_vars if "time" in stations[v].dims]
     observations = (
-        stations[variables].to_dataframe().reset_index().rename(columns={"station": "station_id"})
+        stations[variables]
+        .to_dataframe()
+        .reset_index()
+        .rename(columns={"station": "station_id"})
         .dropna(subset=variables, how="all")
     )
     observations["station_id"] = observations["station_id"].astype(str)
@@ -281,7 +313,10 @@ def build_stations(args, cfg, provider=None) -> Path:
     (out / "LICENSE").write_text(LICENSE_TEXT)
     logger.info(
         "stations folder: %s (%.1f MB, %d stations, %d observations)",
-        out, manifest["size_mb"], manifest["n_stations"], manifest["n_observations"],
+        out,
+        manifest["size_mb"],
+        manifest["n_stations"],
+        manifest["n_observations"],
     )
     return out
 

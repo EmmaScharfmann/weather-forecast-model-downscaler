@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Protocol
 
 import numpy as np
 import pandas as pd
@@ -23,6 +24,7 @@ import xarray as xr
 
 from .constants import STATION_VARIABLES
 from .regions import Region, parse_region
+
 
 logger = logging.getLogger(__name__)
 
@@ -123,8 +125,7 @@ class MeteoFranceHourly:
         "no API key is needed."
     )
     dataset_note = (
-        "hourly 'core' observations: instantaneous 2 m air temperature on the hour, "
-        "parameter temperature_air_mean_2m"
+        "hourly 'core' observations: instantaneous 2 m air temperature on the hour, parameter temperature_air_mean_2m"
     )
 
     _PARAMS = {
@@ -143,7 +144,9 @@ class MeteoFranceHourly:
         self.chunk_size = chunk_size
         self.cache_disable = cache_disable
 
-    def _request(self, variables: Sequence[str], start: pd.Timestamp, end: pd.Timestamp, cache_disable: bool | None = None):
+    def _request(
+        self, variables: Sequence[str], start: pd.Timestamp, end: pd.Timestamp, cache_disable: bool | None = None
+    ):
         """Build a ``wetterdienst`` request.
 
         :param variables: Canonical variable names.
@@ -193,9 +196,9 @@ class MeteoFranceHourly:
         for column in ("start_date", "end_date"):
             df[column] = self._naive_utc(df[column])
         df["station_id"] = df["station_id"].astype(str)
-        return df[
-            ["station_id", "name", "latitude", "longitude", "elevation", "start_date", "end_date"]
-        ].reset_index(drop=True)
+        return df[["station_id", "name", "latitude", "longitude", "elevation", "start_date", "end_date"]].reset_index(
+            drop=True
+        )
 
     @staticmethod
     def _missing_file(exc: BaseException) -> bool:
@@ -224,7 +227,11 @@ class MeteoFranceHourly:
         return isinstance(exc, TypeError) and "non-iterable bool" in str(exc)
 
     def _fetch_chunk(
-        self, ids: Sequence[str], start: pd.Timestamp, end: pd.Timestamp, variables: Sequence[str],
+        self,
+        ids: Sequence[str],
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        variables: Sequence[str],
         cache_disable: bool | None = None,
     ) -> pd.DataFrame:
         """Fetch one chunk of stations, retrying without the file cache if it is corrupted.
@@ -254,12 +261,14 @@ class MeteoFranceHourly:
             return _EMPTY.copy()
         canonical = {self._PARAMS[v][2]: v for v in variables}
         offset = {v: self._PARAMS[v][3] for v in variables}
-        out = pd.DataFrame({
-            "station_id": df["station_id"].astype(str),
-            "variable": df["parameter"].astype(str).map(canonical),
-            "time": self._naive_utc(df["timestamp"]),
-            "value": df["value"].astype("f8"),
-        }).dropna(subset=["variable"])
+        out = pd.DataFrame(
+            {
+                "station_id": df["station_id"].astype(str),
+                "variable": df["parameter"].astype(str).map(canonical),
+                "time": self._naive_utc(df["timestamp"]),
+                "value": df["value"].astype("f8"),
+            }
+        ).dropna(subset=["variable"])
         out["value"] = out["value"] + out["variable"].map(offset)
         return out[(out["time"] >= start) & (out["time"] <= end)]
 
@@ -268,7 +277,7 @@ class MeteoFranceHourly:
         ids = [str(i) for i in station_ids]
         frames = []
         for i in range(0, len(ids), self.chunk_size):
-            chunk = ids[i:i + self.chunk_size]
+            chunk = ids[i : i + self.chunk_size]
             try:
                 frames.append(self._fetch_chunk(chunk, start, end, variables))
             except Exception as exc:  # noqa: BLE001
@@ -425,7 +434,10 @@ def _fetch_with_cache(provider, ids, start, end, variables, cache_dir) -> pd.Dat
         if root.is_dir():
             logger.info(
                 "cached windows for %s: %s (none covers %s .. %s)",
-                variables[0], sorted(d.name for d in root.iterdir()), start, end,
+                variables[0],
+                sorted(d.name for d in root.iterdir()),
+                start,
+                end,
             )
 
     if need:
@@ -521,7 +533,9 @@ def load_stations(
     reason[~usable & ~unknown] = "not active over the window"
     logger.info(
         "%d station(s) listed in region; %d active over the window (%d with unknown start date %s)",
-        len(stations), int(usable.sum()), int(unknown.sum()),
+        len(stations),
+        int(usable.sum()),
+        int(unknown.sum()),
         "included" if include_unknown_start else "skipped",
     )
     ids = list(stations.index[usable])
@@ -534,7 +548,8 @@ def load_stations(
         subset = long[long["variable"] == variable]
         wide = (
             subset.pivot_table(index="time", columns="station_id", values="value", aggfunc="first")
-            if len(subset) else pd.DataFrame(index=pd.DatetimeIndex([], name="time"))
+            if len(subset)
+            else pd.DataFrame(index=pd.DatetimeIndex([], name="time"))
         )
         wide = wide.reindex(index=hours, columns=ids)
         low, high = (qc.ranges or {}).get(variable, STATION_VARIABLES[variable]["range"])
@@ -569,20 +584,25 @@ def load_stations(
     ds["holdout"] = ("station", holdout_mask(kept, holdout_frac))
     for variable in variables:
         ds[variable].attrs["units"] = STATION_VARIABLES[variable]["unit"]
-    ds.attrs.update({
-        "provider": provider.name,
-        "license": provider.license,
-        "window": f"{start} .. {end} (UTC, hourly, inclusive)",
-        "region": list(region),
-        "longitude_convention": "signed -180..180",
-        "qc_min_completeness": qc.min_completeness,
-        "holdout_frac": holdout_frac,
-    })
+    ds.attrs.update(
+        {
+            "provider": provider.name,
+            "license": provider.license,
+            "window": f"{start} .. {end} (UTC, hourly, inclusive)",
+            "region": list(region),
+            "longitude_convention": "signed -180..180",
+            "qc_min_completeness": qc.min_completeness,
+            "holdout_frac": holdout_frac,
+        }
+    )
     return ds, report
 
 
 def load_published_stations(
-    path_or_repo: str | Path, revision: str | None = None, start=None, end=None,
+    path_or_repo: str | Path,
+    revision: str | None = None,
+    start=None,
+    end=None,
 ) -> xr.Dataset:
     """Read a published station dataset, local or from the Hugging Face Hub.
 
@@ -634,14 +654,17 @@ def load_published_stations(
     for variable in variables:
         wide = obs.pivot_table(index="time", columns="station_id", values=variable, aggfunc="first")
         data[variable] = (("time", "station"), wide.reindex(index=hours, columns=ids).to_numpy("f4"))
-    ds = xr.Dataset(data, coords={
-        "time": hours.to_numpy().astype("datetime64[ns]"),
-        "station": np.array(ids, dtype=object),
-        "latitude": ("station", meta["latitude"].to_numpy("f8")),
-        "longitude": ("station", meta["longitude"].to_numpy("f8")),
-        "elevation": ("station", meta["elevation_m"].to_numpy("f8")),
-        "name": ("station", meta["name"].astype(str).to_numpy(dtype=object)),
-    })
+    ds = xr.Dataset(
+        data,
+        coords={
+            "time": hours.to_numpy().astype("datetime64[ns]"),
+            "station": np.array(ids, dtype=object),
+            "latitude": ("station", meta["latitude"].to_numpy("f8")),
+            "longitude": ("station", meta["longitude"].to_numpy("f8")),
+            "elevation": ("station", meta["elevation_m"].to_numpy("f8")),
+            "name": ("station", meta["name"].astype(str).to_numpy(dtype=object)),
+        },
+    )
     ds["holdout"] = ("station", meta["holdout"].to_numpy(bool))
     for variable in variables:
         ds[variable].attrs["units"] = STATION_VARIABLES.get(variable, {}).get("unit", "K")

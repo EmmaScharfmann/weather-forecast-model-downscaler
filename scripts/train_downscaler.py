@@ -31,9 +31,9 @@ import json
 import logging
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -43,14 +43,14 @@ import xarray as xr
 from downscale import downscaler as dsc
 from downscale import hourly as hr
 from downscale.config import Config, load_config
-from downscale.constants import elevation_edges
-from downscale.constants import COAST_CHANNEL
+from downscale.constants import COAST_CHANNEL, elevation_edges
 from downscale.diagnostics import (
     distance_to_coast_km,
     grid_spacing_km,
     land_mask,
     maritime_influence,
 )
+
 
 logger = logging.getLogger("train")
 METHODS = ("line", "spatial", "hourly")
@@ -132,7 +132,8 @@ def get_stats(stats_file: Path, coarse_train: np.ndarray, fine_train: np.ndarray
             "era5_t2m": {"mean": float(coarse_train.mean()), "std": float(coarse_train.std())},
             "residual": {"mean": float(residual.mean()), "std": float(residual.std())},
             "cerra_orography": {
-                "mean": float(static["cerra_orography"].mean()), "std": float(static["cerra_orography"].std()),
+                "mean": float(static["cerra_orography"].mean()),
+                "std": float(static["cerra_orography"].std()),
             },
             "orography_diff": {"mean": float(height_diff.mean()), "std": float(height_diff.std())},
         }
@@ -205,8 +206,16 @@ def crps_per_pixel(ensemble: np.ndarray, truth: np.ndarray) -> np.ndarray:
 
 @torch.no_grad()
 def validate(
-    net, coarse: np.ndarray, fine: np.ndarray, times, static_norm: np.ndarray, stats: dict,
-    members: int, device: str, groups: dict | None = None, batch: int = 8,
+    net,
+    coarse: np.ndarray,
+    fine: np.ndarray,
+    times,
+    static_norm: np.ndarray,
+    stats: dict,
+    members: int,
+    device: str,
+    groups: dict | None = None,
+    batch: int = 8,
 ) -> tuple[dict, dict]:
     """Score the model and plain interpolation over the validation period.
 
@@ -237,8 +246,8 @@ def validate(
     model_scores, baseline_scores = Scores(), Scores()
     hours = pd.DatetimeIndex(times).hour.values
     for i in range(0, len(coarse), batch):
-        coarse_batch, truth = coarse[i:i + batch], fine[i:i + batch]
-        x = torch.from_numpy(dsc.make_inputs(coarse_batch, times[i:i + batch], static_norm, stats)).to(device)
+        coarse_batch, truth = coarse[i : i + batch], fine[i : i + batch]
+        x = torch.from_numpy(dsc.make_inputs(coarse_batch, times[i : i + batch], static_norm, stats)).to(device)
         ensemble = dsc.to_kelvin(coarse_batch, net(x, members).cpu().numpy(), stats)
         mean = ensemble.mean(1)
         squared_error, crps = (mean - truth) ** 2, crps_per_pixel(ensemble, truth)
@@ -252,16 +261,23 @@ def validate(
             model_scores.add(name, squared_error[:, mask].sum(), crps[:, mask].sum(), variance[:, mask].sum(), n)
             baseline_scores.add(name, base_squared[:, mask].sum(), base_absolute[:, mask].sum(), 0.0, n)
             if groups is not None and name == "land":
-                for hour in np.unique(hours[i:i + batch]):
-                    chosen = hours[i:i + batch] == hour
+                for hour in np.unique(hours[i : i + batch]):
+                    chosen = hours[i : i + batch] == hour
                     n_hour = mask.sum() * chosen.sum()
                     key = f"land_{hour:02d}UTC"
                     model_scores.add(
-                        key, squared_error[chosen][:, mask].sum(), crps[chosen][:, mask].sum(),
-                        variance[chosen][:, mask].sum(), n_hour,
+                        key,
+                        squared_error[chosen][:, mask].sum(),
+                        crps[chosen][:, mask].sum(),
+                        variance[chosen][:, mask].sum(),
+                        n_hour,
                     )
                     baseline_scores.add(
-                        key, base_squared[chosen][:, mask].sum(), base_absolute[chosen][:, mask].sum(), 0.0, n_hour,
+                        key,
+                        base_squared[chosen][:, mask].sum(),
+                        base_absolute[chosen][:, mask].sum(),
+                        0.0,
+                        n_hour,
                     )
     net.train()
     return model_scores.table(), baseline_scores.table()
@@ -310,7 +326,7 @@ def figures(out: Path, history: list[dict], model: dsc.Downscaler, coarse, fine,
     hours = pd.DatetimeIndex(times).hour
     candidates = np.flatnonzero(hours == 12) if (hours == 12).any() else np.arange(len(times))
     index = int(candidates[np.argmax(fine[candidates].mean((1, 2)))])
-    ensemble = model.predict(coarse[index:index + 1], times[index:index + 1], members=max(members, 1))[0]
+    ensemble = model.predict(coarse[index : index + 1], times[index : index + 1], members=max(members, 1))[0]
     panels = [
         ("interpolated coarse field", coarse[index]),
         ("target", fine[index]),
@@ -359,8 +375,20 @@ def tendency_stats(coarse: np.ndarray, starts: np.ndarray, ends: np.ndarray, lan
 class Validator:
     """Scores the straight line, the spatial model and the hourly model on the same hours."""
 
-    def __init__(self, coarse, fine, times, hours, starts, ends, spatial: dsc.Downscaler, land: np.ndarray,
-                 members: int, device: str, batch: int = 8):
+    def __init__(
+        self,
+        coarse,
+        fine,
+        times,
+        hours,
+        starts,
+        ends,
+        spatial: dsc.Downscaler,
+        land: np.ndarray,
+        members: int,
+        device: str,
+        batch: int = 8,
+    ):
         """
         :param coarse: Coarse fields [K].
         :type coarse: numpy.ndarray
@@ -408,7 +436,7 @@ class Validator:
         torch.manual_seed(seed)
         scores = {name: Scores() for name in methods}
         for i in range(0, len(self.hours), self.batch):
-            h, s, e = (a[i:i + self.batch] for a in (self.hours, self.starts, self.ends))
+            h, s, e = (a[i : i + self.batch] for a in (self.hours, self.starts, self.ends))
             times = self.times[h]
             offsets = hr.offsets_of(times)
             truth = self.fine[h]
@@ -431,8 +459,11 @@ class Validator:
                 ]:
                     n = self.land.sum() * chosen.sum()
                     scores[name].add(
-                        key, squared[chosen][:, self.land].sum(), crps[chosen][:, self.land].sum(),
-                        variance[chosen][:, self.land].sum(), n,
+                        key,
+                        squared[chosen][:, self.land].sum(),
+                        crps[chosen][:, self.land].sum(),
+                        variance[chosen][:, self.land].sum(),
+                        n,
                     )
         net.train()
         return {name: table.table() for name, table in scores.items()}
@@ -458,12 +489,14 @@ def temporal_figures(out: Path, report: dict, history: list[dict], series: dict)
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(1, 4, figsize=(22, 4.2), constrained_layout=True)
-    offsets = sorted(int(k[len("land_+"):-1]) for k in report["hourly"] if k.startswith("land_+"))
+    offsets = sorted(int(k[len("land_+") : -1]) for k in report["hourly"] if k.startswith("land_+"))
     for name, style in zip(METHODS, ("k--", "C0-o", "C3-s")):
         if name not in report:
             continue
         for axis, metric in zip(ax[:2], ("rmse", "crps")):
-            axis.plot(offsets, [report[name][f"land_+{k}h"][metric] for k in offsets], style, label=SHOWN.get(name, name))
+            axis.plot(
+                offsets, [report[name][f"land_+{k}h"][metric] for k in offsets], style, label=SHOWN.get(name, name)
+            )
     for axis, metric in zip(ax[:2], ("RMSE", "CRPS")):
         axis.set_title(f"{metric} over land against CERRA (K)")
         axis.set_xlabel("hours after the coarse step")
@@ -503,7 +536,10 @@ def point_series(model: hr.HourlyDownscaler, coarse, fine, times, hours, starts,
     pred = model.predict_hours(coarse[s], coarse[e], offsets, times[h], members=4)
     line = hr.temporal_interpolation(coarse[s], coarse[e], offsets)
     return {
-        "times": times[h], "truth": truth[:, y, x], "line": line[:, y, x], "hourly": pred.mean(1)[:, y, x],
+        "times": times[h],
+        "truth": truth[:, y, x],
+        "line": line[:, y, x],
+        "hourly": pred.mean(1)[:, y, x],
         "steps": offsets == 0,
         "where": f"{float(model.lat[y, x]):.2f}N {float(model.lon[y, x]):.2f}E",
     }
@@ -542,7 +578,9 @@ def train_spatial(cfg: Config, args: argparse.Namespace) -> int:
         logger.info(
             "maritime influence added as an input channel: decay scale %.0f km, "
             "distances 0 to %.0f km, grid spacing %.2f km",
-            training.coast_decay_km, float(distance.max()), spacing,
+            training.coast_decay_km,
+            float(distance.max()),
+            spacing,
         )
     times = pd.DatetimeIndex(ds.time.values)
     train_mask, val_mask = split_times(times, cfg.val_years, args.val_start, args.val_end)
@@ -550,7 +588,12 @@ def train_spatial(cfg: Config, args: argparse.Namespace) -> int:
     coarse, fine = ds.coarse_t2m.values.astype("f4"), ds.fine_t2m.values.astype("f4")
     logger.info(
         "loaded %d steps (%d training, %d validation) on a %dx%d grid in %.0fs",
-        len(times), train_mask.sum(), val_mask.sum(), coarse.shape[1], coarse.shape[2], time.time() - started,
+        len(times),
+        train_mask.sum(),
+        val_mask.sum(),
+        coarse.shape[1],
+        coarse.shape[2],
+        time.time() - started,
     )
     stats = get_stats(pairs_dir / "stats.json", coarse[train_mask], fine[train_mask], static)
     static_norm = dsc.static_stack(static, stats, training.coast_distance)
@@ -567,10 +610,14 @@ def train_spatial(cfg: Config, args: argparse.Namespace) -> int:
     groups = {k: v for k, v in groups.items() if v.any()}
 
     model_cfg = dsc.Config(
-        loss=training.loss, base=training.base_channels, depth=training.depth,
+        loss=training.loss,
+        base=training.base_channels,
+        depth=training.depth,
         noise_channels=training.noise_channels if training.loss == "crps" else 0,
-        upsample=training.upsample, noise_fine_fraction=training.noise_fine_fraction,
-        noise_coarse_factor=training.noise_coarse_factor, coast_distance=training.coast_distance,
+        upsample=training.upsample,
+        noise_fine_fraction=training.noise_fine_fraction,
+        noise_coarse_factor=training.noise_coarse_factor,
+        coast_distance=training.coast_distance,
     )
     net = dsc.DownscalerNet(model_cfg).to(device)
     steps_per_epoch = len(train_idx) // training.batch_size
@@ -588,9 +635,13 @@ def train_spatial(cfg: Config, args: argparse.Namespace) -> int:
     logger.info(
         "model: %s loss over %s, %s upsampling, %.0f%% full-resolution noise, %.2fM parameters, "
         "%d steps per epoch, device %s",
-        training.loss, "land only" if training.land_only else "every grid point", training.upsample,
-        100 * training.noise_fine_fraction, sum(p.numel() for p in net.parameters()) / 1e6,
-        steps_per_epoch, device,
+        training.loss,
+        "land only" if training.land_only else "every grid point",
+        training.upsample,
+        100 * training.noise_fine_fraction,
+        sum(p.numel() for p in net.parameters()) / 1e6,
+        steps_per_epoch,
+        device,
     )
 
     best, history = None, []
@@ -599,11 +650,9 @@ def train_spatial(cfg: Config, args: argparse.Namespace) -> int:
         order = rng.permutation(train_idx)
         losses = []
         for step in range(steps_per_epoch):
-            idx = np.sort(order[step * training.batch_size:(step + 1) * training.batch_size])
+            idx = np.sort(order[step * training.batch_size : (step + 1) * training.batch_size])
             coarse_batch, fine_batch = coarse[idx], fine[idx]
-            x = torch.from_numpy(
-                dsc.make_inputs(coarse_batch, times[idx].to_numpy(), static_norm, stats)
-            ).to(device)
+            x = torch.from_numpy(dsc.make_inputs(coarse_batch, times[idx].to_numpy(), static_norm, stats)).to(device)
             target = torch.from_numpy(dsc.residual_norm(coarse_batch, fine_batch, stats)).to(device)
             loss = loss_fn(net(x, train_members), target, loss_mask)
             optimiser.zero_grad(set_to_none=True)
@@ -613,21 +662,38 @@ def train_spatial(cfg: Config, args: argparse.Namespace) -> int:
             scheduler.step()
             losses.append(float(loss))
         model_scores, baseline_scores = validate(
-            net, val_coarse, val_fine, val_times, static_norm, stats, eval_members, device,
+            net,
+            val_coarse,
+            val_fine,
+            val_times,
+            static_norm,
+            stats,
+            eval_members,
+            device,
             groups={"land": land},
         )
         record = {
-            "epoch": epoch, "train_loss": float(np.mean(losses)), "scored_over": headline,
-            "val": model_scores[headline], "baseline": baseline_scores[headline],
+            "epoch": epoch,
+            "train_loss": float(np.mean(losses)),
+            "scored_over": headline,
+            "val": model_scores[headline],
+            "baseline": baseline_scores[headline],
             "seconds": round(time.time() - started, 1),
         }
         history.append(record)
         logger.info(
             "epoch %d/%d  loss %.4f  val rmse %.3f K (interpolation %.3f)  crps %.3f K (interpolation %.3f)  "
             "ssr %s  over %s  [%.0fs]",
-            epoch, training.epochs, record["train_loss"], model_scores[headline]["rmse"],
-            baseline_scores[headline]["rmse"], model_scores[headline]["crps"],
-            baseline_scores[headline]["crps"], model_scores[headline]["ssr"], headline, record["seconds"],
+            epoch,
+            training.epochs,
+            record["train_loss"],
+            model_scores[headline]["rmse"],
+            baseline_scores[headline]["rmse"],
+            model_scores[headline]["crps"],
+            baseline_scores[headline]["crps"],
+            model_scores[headline]["ssr"],
+            headline,
+            record["seconds"],
         )
         score = model_scores[headline]["crps"] if model_cfg.stochastic else model_scores[headline]["rmse"]
         if best is None or score < best:
@@ -699,22 +765,30 @@ def train_temporal(cfg: Config, out: Path, pairs_dir: Path, device: str | None =
     static_path = pairs_dir / "static.zarr"
     if static_path.exists():
         pairs_static = xr.open_zarr(static_path)
-        offset = max(float(np.abs(pairs_static.lat.values - spatial.lat).max()),
-                     float(np.abs(pairs_static.lon.values - spatial.lon).max()))
+        offset = max(
+            float(np.abs(pairs_static.lat.values - spatial.lat).max()),
+            float(np.abs(pairs_static.lon.values - spatial.lon).max()),
+        )
         if offset > 1e-3:
-            raise ValueError(f"pairs grid is {offset:.3f} degrees away from the spatial model's: crop the target alike")
+            raise ValueError(
+                f"pairs grid is {offset:.3f} degrees away from the spatial model's: crop the target alike"
+            )
     land = land_mask(spatial.static)
     land = np.ones(spatial.lat.shape, bool) if land is None else land
 
     hours, starts, ends = hr.window_samples(times)
     if not len(hours):
         raise ValueError("no hour has both ends of its window: are the pairs hourly?")
-    train_mask, val_mask = split_times(pd.DatetimeIndex(times[hours]), cfg.val_years, temporal.val_start, temporal.val_end)
+    train_mask, val_mask = split_times(
+        pd.DatetimeIndex(times[hours]), cfg.val_years, temporal.val_start, temporal.val_end
+    )
     train = tuple(a[train_mask] for a in (hours, starts, ends))
     val = tuple(a[val_mask] for a in (hours, starts, ends))
     logger.info(
         "%d hourly steps: %d training and %d validation hours with both ends of their window",
-        len(times), len(train[0]), len(val[0]),
+        len(times),
+        len(train[0]),
+        len(val[0]),
     )
 
     if temporal.init_hourly:
@@ -739,14 +813,19 @@ def train_temporal(cfg: Config, out: Path, pairs_dir: Path, device: str | None =
     )
     loss_fn = dsc.fair_crps if model_cfg.stochastic else dsc.mse
     if temporal.multiscale and model_cfg.stochastic:
+
         def loss_fn(pred, target, mask):
             return dsc.multiscale_fair_crps(pred, target, mask, temporal.multiscale)
+
     members = training.members if model_cfg.stochastic else 1
     loss_mask = torch.from_numpy(land).to(device) if training.land_only else None
     logger.info(
         "model: %s loss, %.2fM parameters, %s, %d steps per epoch, device %s; tendency std %.2f K",
-        training.loss, sum(p.numel() for p in net.parameters()) / 1e6,
-        "from scratch" if temporal.from_scratch else f"started from {temporal.init_hourly or temporal.spatial_model}", steps_per_epoch, device,
+        training.loss,
+        sum(p.numel() for p in net.parameters()) / 1e6,
+        "from scratch" if temporal.from_scratch else f"started from {temporal.init_hourly or temporal.spatial_model}",
+        steps_per_epoch,
+        device,
         stats["tendency"]["std"],
     )
 
@@ -761,9 +840,11 @@ def train_temporal(cfg: Config, out: Path, pairs_dir: Path, device: str | None =
         order = rng.permutation(len(train[0]))
         losses = []
         for step in range(steps_per_epoch):
-            chosen = np.sort(order[step * training.batch_size:(step + 1) * training.batch_size])
+            chosen = np.sort(order[step * training.batch_size : (step + 1) * training.batch_size])
             h, s, e = (a[chosen] for a in train)
-            x, line = hr.make_hourly_inputs(coarse[s], coarse[e], hr.offsets_of(times[h]), times[h], static_norm, stats)
+            x, line = hr.make_hourly_inputs(
+                coarse[s], coarse[e], hr.offsets_of(times[h]), times[h], static_norm, stats
+            )
             target = torch.from_numpy(hr.hourly_residual(line, fine[h], stats)).to(device)
             loss = loss_fn(net(torch.from_numpy(x).to(device), members), target, loss_mask)
             optimiser.zero_grad(set_to_none=True)
@@ -773,19 +854,33 @@ def train_temporal(cfg: Config, out: Path, pairs_dir: Path, device: str | None =
             scheduler.step()
             losses.append(loss.item())
         scores = validator(net, stats, methods=("hourly",))["hourly"]["land"]
-        record = {"epoch": epoch, "train_loss": float(np.mean(losses)), "val": scores,
-                  "seconds": round(time.time() - started, 1)}
+        record = {
+            "epoch": epoch,
+            "train_loss": float(np.mean(losses)),
+            "val": scores,
+            "seconds": round(time.time() - started, 1),
+        }
         history.append(record)
         logger.info(
             "epoch %d/%d  loss %.4f  val rmse %.3f K  crps %.3f K  ssr %s  [%.0fs]",
-            epoch, training.epochs, record["train_loss"], scores["rmse"], scores["crps"], scores["ssr"],
+            epoch,
+            training.epochs,
+            record["train_loss"],
+            scores["rmse"],
+            scores["crps"],
+            scores["ssr"],
             record["seconds"],
         )
         score = scores["crps"] if model_cfg.stochastic else scores["rmse"]
         if best is None or score < best:
             best = score
             hr.HourlyDownscaler(net, stats, spatial.static, device).save(
-                out / "model.pt", extra={"epoch": epoch, "spatial": str(temporal.spatial_model), "multiscale": list(temporal.multiscale)}
+                out / "model.pt",
+                extra={
+                    "epoch": epoch,
+                    "spatial": str(temporal.spatial_model),
+                    "multiscale": list(temporal.multiscale),
+                },
             )
         (out / "history.json").write_text(json.dumps(history, indent=2))
 
@@ -837,11 +932,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--noise-fine-fraction", type=float, default=None)
     parser.add_argument("--coast-decay-km", type=float, default=None)
     parser.add_argument(
-        "--no-coast-distance", dest="coast_distance", action="store_false", default=None,
+        "--no-coast-distance",
+        dest="coast_distance",
+        action="store_false",
+        default=None,
         help="leave out the distance-to-coast input channel",
     )
     parser.add_argument(
-        "--all-points", dest="land_only", action="store_false", default=None,
+        "--all-points",
+        dest="land_only",
+        action="store_false",
+        default=None,
         help="train on every grid point instead of land only",
     )
     parser.add_argument("--val-start", default=None, help="overrides temporal.val_start with --temporal")
@@ -849,12 +950,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     temporal = parser.add_argument_group("temporal", "the hourly model, with --temporal; defaults from temporal")
     temporal.add_argument("--temporal", action="store_true", help="train the hourly model")
     temporal.add_argument("--spatial", default=None, help="overrides temporal.spatial_model")
-    temporal.add_argument("--from-scratch", action="store_true", default=None, help="do not start from the spatial weights")
     temporal.add_argument(
-        "--init-hourly", default=None, help="start from this hourly checkpoint, keeping its statistics",
+        "--from-scratch", action="store_true", default=None, help="do not start from the spatial weights"
     )
     temporal.add_argument(
-        "--multiscale", type=int, nargs="*", default=None, metavar="FACTOR",
+        "--init-hourly",
+        default=None,
+        help="start from this hourly checkpoint, keeping its statistics",
+    )
+    temporal.add_argument(
+        "--multiscale",
+        type=int,
+        nargs="*",
+        default=None,
+        metavar="FACTOR",
         help="also score block averages of these sizes in pixels, e.g. 2 4 8 16, against noise at the wrong scale",
     )
     parser.add_argument("--device", default=None)
@@ -864,16 +973,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     cfg = load_config(args.config)
     training = cfg.training
     for name in (
-        "loss", "epochs", "batch_size", "learning_rate", "members", "eval_members",
-        "max_steps_per_epoch", "land_only", "upsample", "noise_fine_fraction", "coast_distance", "coast_decay_km",
+        "loss",
+        "epochs",
+        "batch_size",
+        "learning_rate",
+        "members",
+        "eval_members",
+        "max_steps_per_epoch",
+        "land_only",
+        "upsample",
+        "noise_fine_fraction",
+        "coast_distance",
+        "coast_decay_km",
     ):
         value = getattr(args, name, None)
         if value is not None:
             setattr(training, name, value)
     if args.temporal:
-        for name, value in [("spatial_model", args.spatial), ("init_hourly", args.init_hourly),
-                            ("from_scratch", args.from_scratch), ("multiscale", args.multiscale),
-                            ("val_start", args.val_start), ("val_end", args.val_end)]:
+        for name, value in [
+            ("spatial_model", args.spatial),
+            ("init_hourly", args.init_hourly),
+            ("from_scratch", args.from_scratch),
+            ("multiscale", args.multiscale),
+            ("val_start", args.val_start),
+            ("val_end", args.val_end),
+        ]:
             if value is not None:
                 setattr(cfg.temporal, name, value)
         return train_temporal(cfg, Path(args.out), Path(args.pairs or cfg.paths.pairs), args.device)

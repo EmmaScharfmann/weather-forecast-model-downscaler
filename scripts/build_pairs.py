@@ -21,8 +21,8 @@ import logging
 import shutil
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -33,6 +33,7 @@ from downscale.constants import COARSE_CROP_MARGIN_DEG, G
 from downscale.diagnostics import land_mask
 from downscale.regions import crop_indices
 from downscale.station_interp import GridInterpolator
+
 
 logger = logging.getLogger("pairs")
 
@@ -57,8 +58,10 @@ class CoarseOnTargetGrid:
         self.shape = target_lat.shape
         lat, lon = target_lat.ravel(), target_lon.ravel()
         self.box = (
-            float(lat.min()) - COARSE_CROP_MARGIN_DEG, float(lat.max()) + COARSE_CROP_MARGIN_DEG,
-            float(lon.min()) - COARSE_CROP_MARGIN_DEG, float(lon.max()) + COARSE_CROP_MARGIN_DEG,
+            float(lat.min()) - COARSE_CROP_MARGIN_DEG,
+            float(lat.max()) + COARSE_CROP_MARGIN_DEG,
+            float(lon.min()) - COARSE_CROP_MARGIN_DEG,
+            float(lon.max()) + COARSE_CROP_MARGIN_DEG,
         )
         self.points = (lat, lon)
         self._interp: GridInterpolator | None = None
@@ -103,7 +106,7 @@ class CoarseOnTargetGrid:
         times = pd.DatetimeIndex(times)
         parts = []
         for i in range(0, times.size, self.batch):
-            da = self.source(list(times[i:i + self.batch]), [self.variable]).sel(variable=self.variable, drop=True)
+            da = self.source(list(times[i : i + self.batch]), [self.variable]).sel(variable=self.variable, drop=True)
             parts.append(self._to_target(self._crop(da)))
         return np.concatenate(parts, axis=0).astype("f4")
 
@@ -149,13 +152,17 @@ def month_checks(coarse: np.ndarray, fine: np.ndarray) -> dict:
         "nan_fine": int((~np.isfinite(fine)).sum()),
         "corr": round(correlation, 4),
         "mean_diff_K": round(float(difference.mean()), 3),
-        "rmse_K": round(float(np.sqrt((difference ** 2).mean())), 3),
+        "rmse_K": round(float(np.sqrt((difference**2).mean())), 3),
     }
 
 
 def do_month(
-    target_dir: Path, out: Path, tag: str, coarse: CoarseOnTargetGrid,
-    lat: np.ndarray, lon: np.ndarray,
+    target_dir: Path,
+    out: Path,
+    tag: str,
+    coarse: CoarseOnTargetGrid,
+    lat: np.ndarray,
+    lon: np.ndarray,
 ) -> dict | None:
     """Pair one month of target data with the coarse source.
 
@@ -248,9 +255,12 @@ def do_static(target_dir: Path, out: Path, coarse: CoarseOnTargetGrid, geopotent
     difference = ds.cerra_orography - ds.era5_orography
     logger.info(
         "static fields: fine orography %.0f..%.0f m, coarse %.0f..%.0f m, difference %.0f..%.0f m",
-        float(ds.cerra_orography.min()), float(ds.cerra_orography.max()),
-        float(ds.era5_orography.min()), float(ds.era5_orography.max()),
-        float(difference.min()), float(difference.max()),
+        float(ds.cerra_orography.min()),
+        float(ds.cerra_orography.max()),
+        float(ds.era5_orography.min()),
+        float(ds.era5_orography.max()),
+        float(difference.min()),
+        float(difference.max()),
     )
     return target
 
@@ -309,7 +319,7 @@ def consolidate(cfg: Config, out: Path) -> dict:
     stats["land_only"] = bool(cfg.training.land_only and land is not None)
     stats["checks"] = {
         "residual_vs_height_slope_K_per_km": round(slope * 1000, 2),
-        "baseline_rmse_train_K": round(float(np.sqrt((residual ** 2).mean().compute())), 3),
+        "baseline_rmse_train_K": round(float(np.sqrt((residual**2).mean().compute())), 3),
     }
     ds.attrs = {
         "source": "coarse source interpolated onto the target grid, with the target",
@@ -320,7 +330,10 @@ def consolidate(cfg: Config, out: Path) -> dict:
     (out / "stats.json").write_text(json.dumps(stats, indent=2))
     logger.info(
         "consolidated %d steps; residual mean %.2f K, std %.2f K; slope against height %.2f K/km",
-        ds.sizes["time"], stats["residual"]["mean"], stats["residual"]["std"], slope * 1000,
+        ds.sizes["time"],
+        stats["residual"]["mean"],
+        stats["residual"]["std"],
+        slope * 1000,
     )
     check_figure(out)
     return stats
@@ -361,8 +374,11 @@ def check_figure(out: Path) -> None:
     heights = (static.cerra_orography - static.era5_orography).values.ravel()
     ax[3].scatter(heights, difference.values.ravel(), s=1, alpha=0.2)
     ax[3].plot(
-        [heights.min(), heights.max()], [-0.0065 * heights.min(), -0.0065 * heights.max()],
-        "k--", lw=1, label="-6.5 K/km",
+        [heights.min(), heights.max()],
+        [-0.0065 * heights.min(), -0.0065 * heights.max()],
+        "k--",
+        lw=1,
+        label="-6.5 K/km",
     )
     ax[3].set_xlabel("target minus coarse surface height (m)")
     ax[3].set_ylabel("target minus coarse temperature (K)")
@@ -394,9 +410,13 @@ def main(argv: Sequence[str] | None = None, source=None, geopotential=None) -> i
     parser.add_argument("--out", default=None, help="overrides paths.pairs")
     parser.add_argument("--batch", type=int, default=None, help="overrides coarse.fetch_batch")
     parser.add_argument("--consolidate", action="store_true")
-    parser.add_argument("--coarse-source", choices=["era5", "era5-arco"], default=None,
-                        help="overrides coarse.source; era5 reads Earthmover, falling back to Google's public copy "
-                        "when it cannot be opened, era5-arco reads Google's copy only")
+    parser.add_argument(
+        "--coarse-source",
+        choices=["era5", "era5-arco"],
+        default=None,
+        help="overrides coarse.source; era5 reads Earthmover, falling back to Google's public copy "
+        "when it cannot be opened, era5-arco reads Google's copy only",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
@@ -418,7 +438,10 @@ def main(argv: Sequence[str] | None = None, source=None, geopotential=None) -> i
         source = source or era5
         geopotential = geopotential if geopotential is not None else era5.surface_geopotential()
     coarse = CoarseOnTargetGrid(
-        source, static.lat.values, static.lon.values, cfg.coarse.variable,
+        source,
+        static.lat.values,
+        static.lon.values,
+        cfg.coarse.variable,
         batch=args.batch or cfg.coarse.fetch_batch,
     )
     do_static(target_dir, out, coarse, geopotential)
@@ -436,8 +459,13 @@ def main(argv: Sequence[str] | None = None, source=None, geopotential=None) -> i
         reports.append(report)
         logger.info(
             "%s: %d steps, correlation %.3f, mean difference %+.2f K, rmse %.2f K (%ss) %s",
-            tag, report["steps"], report["corr"], report["mean_diff_K"], report["rmse_K"],
-            report["fetch_seconds"], "problems: " + "; ".join(report["problems"]) if report["problems"] else "ok",
+            tag,
+            report["steps"],
+            report["corr"],
+            report["mean_diff_K"],
+            report["rmse_K"],
+            report["fetch_seconds"],
+            "problems: " + "; ".join(report["problems"]) if report["problems"] else "ok",
         )
     with open(out / "month_reports.jsonl", "a") as handle:
         for report in reports:
@@ -445,9 +473,13 @@ def main(argv: Sequence[str] | None = None, source=None, geopotential=None) -> i
 
     done = len(list((out / "months").glob("pairs_*.zarr")))
     bad = [r["tag"] for r in reports if r["problems"]]
-    print(f"\n{done}/{len(tags)} months built; {len(pending)} waiting for the target; {len(bad)} with problems {bad or ''}")
     print(
-        "all months built: rerun with --consolidate" if done == len(tags)
+        f"\n{done}/{len(tags)} months built; {len(pending)} waiting for the target; "
+        f"{len(bad)} with problems {bad or ''}"
+    )
+    print(
+        "all months built: rerun with --consolidate"
+        if done == len(tags)
         else "rerun later to pick up newly downloaded months"
     )
     return 1 if bad else 0

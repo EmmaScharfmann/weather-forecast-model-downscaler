@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .constants import COAST_CHANNEL, STATIC_CHANNELS, TIME_CHANNELS, channels
+from .constants import COAST_CHANNEL, TIME_CHANNELS, channels
 
 
 class _Block(nn.Module):
@@ -36,8 +36,12 @@ class _Block(nn.Module):
         super().__init__()
         groups = min(8, channels_out)
         self.net = nn.Sequential(
-            nn.Conv2d(channels_in, channels_out, 3, padding=1), nn.GroupNorm(groups, channels_out), nn.SiLU(),
-            nn.Conv2d(channels_out, channels_out, 3, padding=1), nn.GroupNorm(groups, channels_out), nn.SiLU(),
+            nn.Conv2d(channels_in, channels_out, 3, padding=1),
+            nn.GroupNorm(groups, channels_out),
+            nn.SiLU(),
+            nn.Conv2d(channels_out, channels_out, 3, padding=1),
+            nn.GroupNorm(groups, channels_out),
+            nn.SiLU(),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -54,7 +58,11 @@ class UNet(nn.Module):
     """Encoder-decoder with skip connections, zero-initialised output layer."""
 
     def __init__(
-        self, channels_in: int, channels_out: int = 1, base: int = 32, depth: int = 3,
+        self,
+        channels_in: int,
+        channels_out: int = 1,
+        base: int = 32,
+        depth: int = 3,
         upsample: str = "transpose",
     ):
         """
@@ -74,17 +82,20 @@ class UNet(nn.Module):
         super().__init__()
         if upsample not in ("transpose", "bilinear"):
             raise ValueError("upsample must be 'transpose' or 'bilinear'")
-        widths = [base * 2 ** i for i in range(depth + 1)]
+        widths = [base * 2**i for i in range(depth + 1)]
         self.inc = _Block(channels_in, widths[0])
         self.down = nn.ModuleList([_Block(widths[i], widths[i + 1]) for i in range(depth)])
-        self.up = nn.ModuleList([
-            nn.ConvTranspose2d(widths[i + 1], widths[i], 2, stride=2) if upsample == "transpose"
-            else nn.Sequential(
-                nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-                nn.Conv2d(widths[i + 1], widths[i], 3, padding=1),
-            )
-            for i in reversed(range(depth))
-        ])
+        self.up = nn.ModuleList(
+            [
+                nn.ConvTranspose2d(widths[i + 1], widths[i], 2, stride=2)
+                if upsample == "transpose"
+                else nn.Sequential(
+                    nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+                    nn.Conv2d(widths[i + 1], widths[i], 3, padding=1),
+                )
+                for i in reversed(range(depth))
+            ]
+        )
         self.dec = nn.ModuleList([_Block(2 * widths[i], widths[i]) for i in reversed(range(depth))])
         self.out = nn.Conv2d(widths[0], channels_out, 1)
         nn.init.zeros_(self.out.weight)
@@ -192,12 +203,8 @@ class DownscalerNet(nn.Module):
                 if not count:
                     continue
                 factor = max(1, int(factor))
-                coarse = torch.randn(
-                    n, count, math.ceil(height / factor), math.ceil(width / factor), device=device
-                )
-                parts.append(
-                    F.interpolate(coarse, size=(height, width), mode="bilinear", align_corners=False)
-                )
+                coarse = torch.randn(n, count, math.ceil(height / factor), math.ceil(width / factor), device=device)
+                parts.append(F.interpolate(coarse, size=(height, width), mode="bilinear", align_corners=False))
         return torch.cat(parts, 1)
 
     def forward(self, x: torch.Tensor, members: int = 1) -> torch.Tensor:
@@ -215,7 +222,7 @@ class DownscalerNet(nn.Module):
         x = x.repeat_interleave(m, 0)
         if self.cfg.stochastic:
             x = torch.cat([x, self._noise(batch * m, height, width, x.device)], 1)
-        multiple = 2 ** self.cfg.depth
+        multiple = 2**self.cfg.depth
         pad_h, pad_w = (-height) % multiple, (-width) % multiple
         if pad_h or pad_w:
             x = F.pad(x, (0, pad_w, 0, pad_h), mode="replicate")
@@ -308,7 +315,10 @@ def static_stack(static: dict, stats: dict, coast_distance: bool = False) -> np.
     :raises KeyError: If the distance channel is requested but absent.
     """
     height_diff = static["cerra_orography"] - static["era5_orography"]
-    normalise = lambda values, key: (values - stats[key]["mean"]) / stats[key]["std"]
+
+    def normalise(values, key):
+        return (values - stats[key]["mean"]) / stats[key]["std"]
+
     stack = [
         normalise(static["cerra_orography"], "cerra_orography"),
         (height_diff - stats["orography_diff"]["mean"]) / stats["orography_diff"]["std"],
@@ -355,9 +365,7 @@ def make_inputs(coarse_k: np.ndarray, times, static_norm: np.ndarray, stats: dic
     n_times, height, width = coarse_k.shape
     coarse = ((coarse_k - stats["era5_t2m"]["mean"]) / stats["era5_t2m"]["std"]).astype("f4")[:, None]
     static = np.broadcast_to(static_norm[None], (n_times, *static_norm.shape))
-    calendar = np.broadcast_to(
-        time_features(times)[:, :, None, None], (n_times, len(TIME_CHANNELS), height, width)
-    )
+    calendar = np.broadcast_to(time_features(times)[:, :, None, None], (n_times, len(TIME_CHANNELS), height, width))
     return np.concatenate([coarse, static, calendar], 1)
 
 
@@ -424,17 +432,20 @@ class Downscaler:
         :returns: ``None``
         :rtype: None
         """
-        torch.save({
-            "state_dict": self.net.state_dict(),
-            "config": asdict(self.net.cfg),
-            "stats": self.stats,
-            "static": {k: np.asarray(v) for k, v in self.static.items()},
-            "channels": self.net.cfg.channels,
-            "extra": extra or {},
-        }, path)
+        torch.save(
+            {
+                "state_dict": self.net.state_dict(),
+                "config": asdict(self.net.cfg),
+                "stats": self.stats,
+                "static": {k: np.asarray(v) for k, v in self.static.items()},
+                "channels": self.net.cfg.channels,
+                "extra": extra or {},
+            },
+            path,
+        )
 
     @classmethod
-    def load(cls, path, device: str | None = None) -> "Downscaler":
+    def load(cls, path, device: str | None = None) -> Downscaler:
         """Read a checkpoint.
 
         :param path: Checkpoint file.
@@ -452,9 +463,7 @@ class Downscaler:
         known = {f.name for f in fields(Config)}
         cfg = Config(**{k: v for k, v in checkpoint["config"].items() if k in known})
         if checkpoint["channels"] != cfg.channels:
-            raise ValueError(
-                f"checkpoint channels {checkpoint['channels']} differ from this code's {cfg.channels}"
-            )
+            raise ValueError(f"checkpoint channels {checkpoint['channels']} differ from this code's {cfg.channels}")
         net = DownscalerNet(cfg)
         net.load_state_dict(checkpoint["state_dict"])
         return cls(net, checkpoint["stats"], checkpoint["static"], device)
@@ -476,10 +485,10 @@ class Downscaler:
         """
         out = []
         for i in range(0, len(coarse_k), batch):
-            coarse = coarse_k[i:i + batch]
-            x = torch.from_numpy(
-                make_inputs(coarse, times[i:i + batch], self.static_norm, self.stats)
-            ).to(self.device)
+            coarse = coarse_k[i : i + batch]
+            x = torch.from_numpy(make_inputs(coarse, times[i : i + batch], self.static_norm, self.stats)).to(
+                self.device
+            )
             pred = self.net(x, members).cpu().numpy()
             out.append(to_kelvin(coarse, pred, self.stats).astype("f4"))
         return np.concatenate(out, 0)

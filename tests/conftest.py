@@ -154,8 +154,7 @@ def station_set(fine_grid):
     hours = pd.date_range("2023-08-05", "2023-08-20", freq="1h").to_numpy().astype("datetime64[ns]")
     hour_of_day = pd.DatetimeIndex(hours).hour.values
     values = (
-        300 - 0.0065 * elevation[None, :] + diurnal(hour_of_day)[:, None]
-        + rng.normal(0, 1.2, (len(hours), n))
+        300 - 0.0065 * elevation[None, :] + diurnal(hour_of_day)[:, None] + rng.normal(0, 1.2, (len(hours), n))
     ).astype("f4")
     ds = xr.Dataset(
         {"t2m": (("time", "station"), values)},
@@ -219,9 +218,7 @@ def analysis_source(global_grid):
         def __call__(self, times, variables):
             index = pd.DatetimeIndex(times)
             self.calls.append(len(index))
-            values = (
-                (300 - 0.0065 * field)[None] + diurnal(index.hour.values)[:, None, None]
-            ).astype("f4")
+            values = ((300 - 0.0065 * field)[None] + diurnal(index.hour.values)[:, None, None]).astype("f4")
             return xr.DataArray(
                 values[:, None],
                 dims=("time", "variable", "lat", "lon"),

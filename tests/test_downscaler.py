@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+
 torch = pytest.importorskip("torch", reason="torch is installed with requirements/downscaler.txt")
 
 from downscale import downscaler as dsc  # noqa: E402
@@ -165,7 +166,10 @@ def test_coarse_only_noise_is_smooth_at_the_grid_scale():
     torch.manual_seed(0)
     rough = dsc.DownscalerNet(dsc.Config(base=8, noise_channels=4, noise_fine_fraction=1.0))
     smooth = dsc.DownscalerNet(dsc.Config(base=8, noise_channels=4, noise_fine_fraction=0.0))
-    gradient = lambda n: float((n[..., 1:] - n[..., :-1]).abs().mean())
+
+    def gradient(n):
+        return float((n[..., 1:] - n[..., :-1]).abs().mean())
+
     rough_noise = rough._noise(2, 64, 64, "cpu")
     smooth_noise = smooth._noise(2, 64, 64, "cpu")
     assert rough_noise.shape == smooth_noise.shape == (2, 4, 64, 64)
@@ -189,6 +193,7 @@ def test_a_checkpoint_without_the_newer_fields_still_loads(tmp_path, static_fiel
     restored = dsc.Downscaler.load(tmp_path / "model.pt", device="cpu")
     assert restored.net.cfg.upsample == "transpose"
     assert restored.net.cfg.noise_fine_fraction == 0.5
+
 
 def test_multiscale_crps_penalises_members_that_differ_at_a_coarse_scale():
     torch.manual_seed(0)

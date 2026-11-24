@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+
 logger = logging.getLogger(__name__)
 
 #: Attribution required by each upstream source.
@@ -101,7 +102,7 @@ class ModelArtefacts:
     evaluation: dict | None
 
     @classmethod
-    def load(cls, run_dir: Path, evaluation_dir: Path | None = None) -> "ModelArtefacts":
+    def load(cls, run_dir: Path, evaluation_dir: Path | None = None) -> ModelArtefacts:
         """Collect whatever reports a run directory holds.
 
         :param run_dir: Directory written by the training script.
@@ -128,8 +129,13 @@ class ModelArtefacts:
 
 
 def model_card(
-    artefacts: ModelArtefacts, repo_id: str, dataset_repo: str | None, region: str,
-    target_name: str, coarse_name: str, forecast_repo: str,
+    artefacts: ModelArtefacts,
+    repo_id: str,
+    dataset_repo: str | None,
+    region: str,
+    target_name: str,
+    coarse_name: str,
+    forecast_repo: str,
 ) -> str:
     """Build the model card.
 
@@ -199,17 +205,22 @@ def model_card(
     results_text = "\n\n".join(results) or "No evaluation report was available when this card was written."
 
     channels = cfg.get("channels") or []
-    channel_text = "\n".join(f"- `{name}`" for name in channels) if channels else (
-        "- the coarse field interpolated onto the fine grid\n"
-        "- fine-scale terrain height, and its difference from the coarse model's surface\n"
-        "- land fraction, and an index of maritime influence\n"
-        "- latitude and longitude\n"
-        "- time of day and day of year, as sine and cosine pairs"
+    channel_text = (
+        "\n".join(f"- `{name}`" for name in channels)
+        if channels
+        else (
+            "- the coarse field interpolated onto the fine grid\n"
+            "- fine-scale terrain height, and its difference from the coarse model's surface\n"
+            "- land fraction, and an index of maritime influence\n"
+            "- latitude and longitude\n"
+            "- time of day and day of year, as sine and cosine pairs"
+        )
     )
 
     dataset_line = (
         f"Training data: [{dataset_repo}](https://huggingface.co/datasets/{dataset_repo})."
-        if dataset_repo else "Training data is not published."
+        if dataset_repo
+        else "Training data is not published."
     )
 
     return f"""---
@@ -248,8 +259,8 @@ checkpoint:
 
 {channel_text}
 
-Trained with the {cfg.get('loss', 'crps')} loss, the model also takes
-{cfg.get('noise_channels', 0)} noise channels, so repeated passes give
+Trained with the {cfg.get("loss", "crps")} loss, the model also takes
+{cfg.get("noise_channels", 0)} noise channels, so repeated passes give
 different plausible fields that together form an ensemble.
 
 ## Usage
@@ -293,10 +304,10 @@ only, since the target treats sea surface temperature differently from land.
 
 The weights are derived from the sources below and inherit their terms.
 
-- {ATTRIBUTIONS['cerra']}
-- {ATTRIBUTIONS['era5']}
-- {ATTRIBUTIONS['aifs']}
-- {ATTRIBUTIONS['meteofrance']}
+- {ATTRIBUTIONS["cerra"]}
+- {ATTRIBUTIONS["era5"]}
+- {ATTRIBUTIONS["aifs"]}
+- {ATTRIBUTIONS["meteofrance"]}
 
 Neither Copernicus, ECMWF nor Météo-France endorses this work.
 """
@@ -333,9 +344,9 @@ def dataset_card(
         ("Size", manifest.get("size_mb", "unknown")),
     ]
     model_line = (
-        f"A downscaler trained on this data is at "
-        f"[{model_repo}](https://huggingface.co/{model_repo})."
-        if model_repo else "No trained model is published alongside this data."
+        f"A downscaler trained on this data is at [{model_repo}](https://huggingface.co/{model_repo})."
+        if model_repo
+        else "No trained model is published alongside this data."
     )
     stats = manifest.get("stats", {}).get("checks", {})
     baseline = stats.get("baseline_rmse_train_K")
@@ -414,8 +425,8 @@ residual = pairs.fine_t2m - pairs.coarse_t2m    # what a downscaler must learn
 
 ## Licence and attribution
 
-- {ATTRIBUTIONS['cerra']}
-- {ATTRIBUTIONS['era5']}
+- {ATTRIBUTIONS["cerra"]}
+- {ATTRIBUTIONS["era5"]}
 
 Neither Copernicus nor ECMWF endorses this work.
 """
@@ -467,16 +478,17 @@ def target_card(manifest: dict, repo_id: str, region: str) -> str:
         ("Size", f"{manifest.get('size_mb', '?')} MB"),
     ]
     request_block = (
-        "\n".join("    " + line for line in json.dumps(request, indent=4).splitlines())
-        if request else "    {}"
+        "\n".join("    " + line for line in json.dumps(request, indent=4).splitlines()) if request else "    {}"
     )
     crop = manifest.get("crop", {})
     crop_line = (
         f"rows {crop.get('y0')} to {crop.get('y1')} and columns {crop.get('x0')} to {crop.get('x1')} "
         f"of the source grid of {crop.get('grid_shape', ['?', '?'])}"
-        if crop else "an index rectangle recorded in `crop.json`"
+        if crop
+        else "an index rectangle recorded in `crop.json`"
     )
 
+    cdsapi_version = f" {manifest['cdsapi_version']}" if manifest.get("cdsapi_version") else ""
     return f"""---
 license: other
 license_name: copernicus
@@ -496,21 +508,21 @@ handling, which is the slow part of working with this reanalysis.
 
 {_table(rows)}
 
-{manifest.get('boundary_note', '')}
+{manifest.get("boundary_note", "")}
 
 ## How the data was obtained
 
 {name} is distributed through the Copernicus Climate Data Store. Access needs a
 free account, an API key in `~/.cdsapirc`, and acceptance of the dataset's
 licence on its catalogue page; requests are refused until the licence is
-accepted. Downloads used the `cdsapi` client{f" {manifest.get('cdsapi_version')}" if manifest.get('cdsapi_version') else ""},
+accepted. Downloads used the `cdsapi` client{cdsapi_version},
 one request per month, with a body of this form:
 
 ```python
 import cdsapi
 
 cdsapi.Client().retrieve(
-    "{manifest.get('dataset', '')}",
+    "{manifest.get("dataset", "")}",
 {request_block},
     "target.grib",
 )
@@ -559,9 +571,9 @@ target.t2m.isel(time=0).plot(x="lon", y="lat")
 
 ## Licence and attribution
 
-{ATTRIBUTIONS['cerra']}
+{ATTRIBUTIONS["cerra"]}
 
-Licence to use Copernicus products: {manifest.get('licence_url', 'https://cds.climate.copernicus.eu/')}
+Licence to use Copernicus products: {manifest.get("licence_url", "https://cds.climate.copernicus.eu/")}
 
 Neither Copernicus, C3S nor ECMWF endorses this work or is responsible for it.
 """
@@ -627,9 +639,9 @@ even though the result is small.
 
 ## How the data was collected
 
-{manifest.get('access_note', '')}
+{manifest.get("access_note", "")}
 
-The subset published here is {manifest.get('dataset_note', 'hourly observations')}.
+The subset published here is {manifest.get("dataset_note", "hourly observations")}.
 Collection used `{tool}{f" {tool_version}" if tool_version else ""}`, and proceeded
 in three steps:
 
@@ -662,7 +674,7 @@ obs = pd.read_parquet("observations.parquet")
 ## Quality control
 
 Stations were kept when they were active over the whole period and reported a
-valid value for at least {manifest.get('min_completeness', '?')} of its hours.
+valid value for at least {manifest.get("min_completeness", "?")} of its hours.
 Values outside a plausible range were discarded first, which removes sentinel
 values such as -9999. Many listed stations measure other variables and return
 no temperature at all; these appear in the report with zero completeness, which
@@ -687,7 +699,7 @@ it to keep a set of stations out of any training.
 The observations are published by {network} under {licence_line} and are
 redistributed here under the same terms.
 
-> {manifest.get('attribution', '')}
+> {manifest.get("attribution", "")}
 
 {network} does not endorse this work and is not responsible for it.
 """

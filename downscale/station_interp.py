@@ -1,24 +1,25 @@
 """Interpolation of gridded fields to station points.
 
-Two interpolators are provided: 
+Two interpolators are provided:
 :class:`GridInterpolator` for regular
 latitude/longitude grids such as a global forecast, and
 :class:`CurvilinearInterpolator` for grids whose coordinates are two
-dimensional, such as the Lambert grid of a regional reanalysis. 
+dimensional, such as the Lambert grid of a regional reanalysis.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 
-from .constants import EARTH_RADIUS_KM, G, MAX_STATION_DISTANCE_KM, STD_LAPSE
+from .constants import EARTH_RADIUS_KM, MAX_STATION_DISTANCE_KM, STD_LAPSE, G
 from .regions import to_signed_lon
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ class GridInterpolator:
         point_lat: Sequence[float],
         point_lon: Sequence[float],
         method: str = "bilinear",
-    ) -> "GridInterpolator":
+    ) -> GridInterpolator:
         """Compute interpolation weights for a set of points.
 
         :param grid_lat: Grid latitudes, ascending or descending.
@@ -166,7 +167,7 @@ class CurvilinearInterpolator:
         point_lon: Sequence[float],
         k: int = 4,
         max_km: float = MAX_STATION_DISTANCE_KM,
-    ) -> "CurvilinearInterpolator":
+    ) -> CurvilinearInterpolator:
         """Compute inverse-distance weights from the nearest grid cells.
 
         :param grid_lat2d: Grid latitudes with shape ``(y, x)``.
@@ -246,9 +247,7 @@ def interpolator_for(
     )
 
 
-def curvilinear_for(
-    lat2d: np.ndarray, lon2d: np.ndarray, stations: xr.Dataset, k: int = 4
-) -> CurvilinearInterpolator:
+def curvilinear_for(lat2d: np.ndarray, lon2d: np.ndarray, stations: xr.Dataset, k: int = 4) -> CurvilinearInterpolator:
     """Build a curvilinear-grid interpolator for a station set.
 
     :param lat2d: Grid latitudes with shape ``(y, x)``.
@@ -262,9 +261,7 @@ def curvilinear_for(
     :returns: Interpolator for those stations.
     :rtype: CurvilinearInterpolator
     """
-    return CurvilinearInterpolator.build(
-        lat2d, lon2d, stations["latitude"].values, stations["longitude"].values, k=k
-    )
+    return CurvilinearInterpolator.build(lat2d, lon2d, stations["latitude"].values, stations["longitude"].values, k=k)
 
 
 def lapse_correct(
@@ -411,13 +408,9 @@ def analysis_baseline(
     columns = {"nearest": nearest.apply(field), "bilinear": bilinear.apply(field)}
     if orography is not None:
         h_model = bilinear.apply(orography.astype("f8")).values
-        columns["bilinear_lapse"] = lapse_correct(
-            columns["bilinear"], stations["elevation"].values, h_model, gamma
-        )
+        columns["bilinear_lapse"] = lapse_correct(columns["bilinear"], stations["elevation"].values, h_model, gamma)
 
-    position = np.searchsorted(
-        unique.to_numpy().astype("datetime64[ns]"), valid.ravel().astype("datetime64[ns]")
-    )
+    position = np.searchsorted(unique.to_numpy().astype("datetime64[ns]"), valid.ravel().astype("datetime64[ns]"))
     out = {
         name: (("init_time", "lead_time", "station"), arr.values[position].reshape(init.size, lead.size, -1))
         for name, arr in columns.items()

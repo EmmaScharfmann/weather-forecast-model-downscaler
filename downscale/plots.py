@@ -6,24 +6,31 @@ return the figure so it displays inline in a notebook.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap
 
+
 #: One colour per forecast throughout the figures.
-COLOURS = {"AIFS-ENS": "tab:blue", "AIFS-ENS + downscaler": "tab:red", "CERRA": "tab:green",
-           "CERRA (the floor)": "tab:green"}
+COLOURS = {
+    "AIFS-ENS": "tab:blue",
+    "AIFS-ENS + downscaler": "tab:red",
+    "CERRA": "tab:green",
+    "CERRA (the floor)": "tab:green",
+}
 FRANCE_EXTENT = (-5.5, 10.0, 41.2, 51.4)
 #: Temperature colours, as on the Space.
 TEMPERATURE_CMAP = "RdYlBu_r"
 #: Background where a map has no value, the masked sea mostly, as on the Space.
 SEA = "#e8eef3"
 #: Elevation colours, as on the Space: green lowlands, tan hills, white peaks; meant for 0 to 3000 m.
-TERRAIN_CMAP = LinearSegmentedColormap.from_list("terrain", [
-    (0, "#3b7d3b"), (0.1, "#8fbf62"), (0.25, "#e6dc9a"), (0.5, "#b8925e"), (0.75, "#8a6a52"), (1, "#f5f5f5")])
+TERRAIN_CMAP = LinearSegmentedColormap.from_list(
+    "terrain",
+    [(0, "#3b7d3b"), (0.1, "#8fbf62"), (0.25, "#e6dc9a"), (0.5, "#b8925e"), (0.75, "#8a6a52"), (1, "#f5f5f5")],
+)
 
 
 def native_cells(field, lat2d: np.ndarray, lon2d: np.ndarray, land: np.ndarray | None = None) -> np.ndarray:
@@ -106,9 +113,15 @@ def _geo_axes(fig, n: int, extent: Sequence[float], ncols: int | None = None):
 
 
 def maps(
-    panels: Sequence[tuple[str, np.ndarray, np.ndarray, np.ndarray]], *, cmap: str = TEMPERATURE_CMAP,
-    vmin: float | None = None, vmax: float | None = None, label: str = "°C",
-    extent: Sequence[float] = FRANCE_EXTENT, title: str | None = None, width: float = 5.2,
+    panels: Sequence[tuple[str, np.ndarray, np.ndarray, np.ndarray]],
+    *,
+    cmap: str = TEMPERATURE_CMAP,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    label: str = "°C",
+    extent: Sequence[float] = FRANCE_EXTENT,
+    title: str | None = None,
+    width: float = 5.2,
 ):
     """Draw fields side by side on one colour scale.
 
@@ -150,8 +163,12 @@ def maps(
 
 
 def map_grid(
-    panels: Sequence[dict], *, ncols: int = 2, extent: Sequence[float] = FRANCE_EXTENT,
-    title: str | None = None, width: float = 6.0,
+    panels: Sequence[dict],
+    *,
+    ncols: int = 2,
+    extent: Sequence[float] = FRANCE_EXTENT,
+    title: str | None = None,
+    width: float = 6.0,
 ):
     """Draw maps in a grid, each with its own colour scale and colour bar.
 
@@ -180,8 +197,16 @@ def map_grid(
         finite = values[np.isfinite(values)]
         vmin = panel.get("vmin", float(np.percentile(finite, 1)))
         vmax = panel.get("vmax", float(np.percentile(finite, 99)))
-        mesh = axis.pcolormesh(panel["lon"], panel["lat"], values, cmap=panel.get("cmap", TEMPERATURE_CMAP),
-                               vmin=vmin, vmax=vmax, shading="auto", **kwargs)
+        mesh = axis.pcolormesh(
+            panel["lon"],
+            panel["lat"],
+            values,
+            cmap=panel.get("cmap", TEMPERATURE_CMAP),
+            vmin=vmin,
+            vmax=vmax,
+            shading="auto",
+            **kwargs,
+        )
         axis.set_title(panel["title"], fontsize=12)
         fig.colorbar(mesh, ax=axis, label=panel.get("label", ""), shrink=0.9, pad=0.02)
     if title:
@@ -190,8 +215,11 @@ def map_grid(
 
 
 def lead_figure(
-    tables: dict[str, pd.DataFrame], metrics: Sequence[str] = ("rmse_K", "crps_K"),
-    references: Sequence[str] = (), title: str | None = None, colours: dict[str, str] | None = None,
+    tables: dict[str, pd.DataFrame],
+    metrics: Sequence[str] = ("rmse_K", "crps_K"),
+    references: Sequence[str] = (),
+    title: str | None = None,
+    colours: dict[str, str] | None = None,
 ):
     """Plot scores against lead time.
 
@@ -210,16 +238,28 @@ def lead_figure(
     :rtype: matplotlib.figure.Figure
     """
     colours = {**COLOURS, **(colours or {})}
-    names = {"rmse_K": "RMSE of the ensemble mean (K)", "crps_K": "fair CRPS (K)", "bias_K": "bias (K)",
-             "spread_skill": "spread / RMSE", "spread_K": "ensemble spread (K)"}
+    names = {
+        "rmse_K": "RMSE of the ensemble mean (K)",
+        "crps_K": "fair CRPS (K)",
+        "bias_K": "bias (K)",
+        "spread_skill": "spread / RMSE",
+        "spread_K": "ensemble spread (K)",
+    }
     fig, axes = plt.subplots(1, len(metrics), figsize=(6 * len(metrics), 4.2), layout="constrained", squeeze=False)
     for axis, metric in zip(axes[0], metrics):
         for name, table in tables.items():
             reference = name in references
             if reference and metric not in ("rmse_K", "bias_K"):
                 continue
-            axis.plot(table.lead_hours / 24, table[metric], marker="o", ms=3, color=colours.get(name, "tab:green"),
-                      ls="--" if reference else "-", label=name)
+            axis.plot(
+                table.lead_hours / 24,
+                table[metric],
+                marker="o",
+                ms=3,
+                color=colours.get(name, "tab:green"),
+                ls="--" if reference else "-",
+                label=name,
+            )
         if metric in ("bias_K",):
             axis.axhline(0, color="k", lw=0.8)
         if metric == "spread_skill":
@@ -236,8 +276,14 @@ def lead_figure(
 
 
 def station_maps(
-    lon: np.ndarray, lat: np.ndarray, rmse: dict[str, np.ndarray], *, baseline: str = "AIFS-ENS",
-    improved: str = "AIFS-ENS + downscaler", extent: Sequence[float] = FRANCE_EXTENT, title: str | None = None,
+    lon: np.ndarray,
+    lat: np.ndarray,
+    rmse: dict[str, np.ndarray],
+    *,
+    baseline: str = "AIFS-ENS",
+    improved: str = "AIFS-ENS + downscaler",
+    extent: Sequence[float] = FRANCE_EXTENT,
+    title: str | None = None,
     width: float = 5.2,
 ):
     """Map the RMSE of two forecasts at each station, and how much the second lowers it.
@@ -269,16 +315,33 @@ def station_maps(
     gain = rmse[baseline] - rmse[improved]
     both = np.concatenate([rmse[baseline], rmse[improved]])
     low, high = np.nanpercentile(both, [2, 98])
-    gain_cmap = LinearSegmentedColormap.from_list(
-        "gain", ["#8c2d04", "#e6705a", "#f7f7f7", "#5aae61", "#00441b"])
+    gain_cmap = LinearSegmentedColormap.from_list("gain", ["#8c2d04", "#e6705a", "#f7f7f7", "#5aae61", "#00441b"])
     improved_share = 100 * np.mean(gain[np.isfinite(gain)] > 0)
     panels = [
-        (rmse[baseline], f"{baseline}\nmedian RMSE {np.nanmedian(rmse[baseline]):.2f} K", "YlOrRd", low, high,
-         "RMSE (K)"),
-        (rmse[improved], f"{improved}\nmedian RMSE {np.nanmedian(rmse[improved]):.2f} K", "YlOrRd", low, high,
-         "RMSE (K)"),
-        (gain, f"RMSE reduction\n{improved_share:.0f}% of stations improve", gain_cmap, -1.5, 1.5,
-         "RMSE reduction (K)"),
+        (
+            rmse[baseline],
+            f"{baseline}\nmedian RMSE {np.nanmedian(rmse[baseline]):.2f} K",
+            "YlOrRd",
+            low,
+            high,
+            "RMSE (K)",
+        ),
+        (
+            rmse[improved],
+            f"{improved}\nmedian RMSE {np.nanmedian(rmse[improved]):.2f} K",
+            "YlOrRd",
+            low,
+            high,
+            "RMSE (K)",
+        ),
+        (
+            gain,
+            f"RMSE reduction\n{improved_share:.0f}% of stations improve",
+            gain_cmap,
+            -1.5,
+            1.5,
+            "RMSE reduction (K)",
+        ),
     ]
     fig = plt.figure(layout="constrained")
     grid = fig.add_gridspec(2, 4)
@@ -288,8 +351,19 @@ def station_maps(
     for axis, (values, name, cmap, vmin, vmax, label) in zip(axes, panels):
         ok = np.isfinite(values)
         order = np.argsort(np.abs(values[ok]))
-        points = axis.scatter(lon[ok][order], lat[ok][order], c=values[ok][order], cmap=cmap, vmin=vmin, vmax=vmax,
-                              s=14, edgecolors="#444444", linewidths=0.3, zorder=3, **kwargs)
+        points = axis.scatter(
+            lon[ok][order],
+            lat[ok][order],
+            c=values[ok][order],
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            s=14,
+            edgecolors="#444444",
+            linewidths=0.3,
+            zorder=3,
+            **kwargs,
+        )
         axis.set_title(name, fontsize=11)
         fig.colorbar(points, ax=axis, label=label, shrink=0.85, pad=0.02)
     if title:
@@ -314,8 +388,13 @@ def elevation_figure(table: pd.DataFrame, title: str | None = None):
     fig, axis = plt.subplots(figsize=(1.4 * len(bands) + 3, 4.2), layout="constrained")
     for i, name in enumerate(fields):
         chosen = table[table.field == name].set_index("band").reindex(bands)
-        axis.bar(np.arange(len(bands)) + (i - (len(fields) - 1) / 2) * width, chosen.rmse_K, width,
-                 color=COLOURS.get(name), label=name)
+        axis.bar(
+            np.arange(len(bands)) + (i - (len(fields) - 1) / 2) * width,
+            chosen.rmse_K,
+            width,
+            color=COLOURS.get(name),
+            label=name,
+        )
     axis.set_xticks(np.arange(len(bands)))
     axis.set_xticklabels([f"{b}\n(n={counts[b]:,})" for b in bands], fontsize=8)
     axis.set_ylabel("RMSE against stations (K)")
@@ -327,7 +406,10 @@ def elevation_figure(table: pd.DataFrame, title: str | None = None):
 
 
 def plume_figure(
-    valid: np.ndarray, series: dict[str, np.ndarray], observed: np.ndarray | None = None, title: str | None = None,
+    valid: np.ndarray,
+    series: dict[str, np.ndarray],
+    observed: np.ndarray | None = None,
+    title: str | None = None,
 ):
     """Every member of several ensembles at one point, against time.
 

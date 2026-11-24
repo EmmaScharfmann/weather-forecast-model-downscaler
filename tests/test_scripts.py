@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import build_pairs  # noqa: E402
@@ -16,6 +17,7 @@ import download_cerra  # noqa: E402
 import eval_downscaled  # noqa: E402
 import fetch_forecasts  # noqa: E402
 from conftest import coarse_terrain, diurnal, terrain  # noqa: E402
+
 from downscale.config import load_config  # noqa: E402
 
 
@@ -60,7 +62,8 @@ def fake_cds(source_grid):
     def opener(path):
         request = json.loads(Path(path).read_text())
         coords = {
-            "latitude": (("y", "x"), lat), "longitude": (("y", "x"), lon),
+            "latitude": (("y", "x"), lat),
+            "longitude": (("y", "x"), lon),
             "step": np.timedelta64(0, "ns"),
         }
         if "orography" in request["variable"]:
@@ -68,13 +71,14 @@ def fake_cds(source_grid):
                 {"orog": (("y", "x"), orography.astype("f4")), "lsm": (("y", "x"), np.ones_like(lat, "f4"))},
                 coords=coords,
             )
-        times = pd.DatetimeIndex([
-            pd.Timestamp(int(request["year"]), int(request["month"]), int(d)) + pd.Timedelta(t + ":00")
-            for d in request["day"] for t in request["time"]
-        ])
-        values = (
-            300 - 0.0065 * orography[None] + diurnal(times.hour.values)[:, None, None]
-        ).astype("f4")
+        times = pd.DatetimeIndex(
+            [
+                pd.Timestamp(int(request["year"]), int(request["month"]), int(d)) + pd.Timedelta(t + ":00")
+                for d in request["day"]
+                for t in request["time"]
+            ]
+        )
+        values = (300 - 0.0065 * orography[None] + diurnal(times.hour.values)[:, None, None]).astype("f4")
         return xr.Dataset(
             {"t2m": (("time", "y", "x"), values)},
             coords={**coords, "time": times.to_numpy(), "valid_time": ("time", times.to_numpy())},
@@ -89,15 +93,21 @@ def config_path(tmp_path):
     import yaml
 
     path = tmp_path / "config.yaml"
-    path.write_text(yaml.safe_dump({
-        "region": {"name": None, "box": [41.0, 51.5, -5.5, 10.0]},
-        "target": {"years": [2014, 2014], "train_years": [2014, 2014]},
-        "paths": {
-            "target": str(tmp_path / "target"), "pairs": str(tmp_path / "pairs"),
-            "downscaled": str(tmp_path / "downscaled"), "evaluation": str(tmp_path / "eval"),
-            "stations_cache": str(tmp_path / "cache"),
-        },
-    }))
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "region": {"name": None, "box": [41.0, 51.5, -5.5, 10.0]},
+                "target": {"years": [2014, 2014], "train_years": [2014, 2014]},
+                "paths": {
+                    "target": str(tmp_path / "target"),
+                    "pairs": str(tmp_path / "pairs"),
+                    "downscaled": str(tmp_path / "downscaled"),
+                    "evaluation": str(tmp_path / "eval"),
+                    "stations_cache": str(tmp_path / "cache"),
+                },
+            }
+        )
+    )
     return path
 
 
@@ -219,11 +229,13 @@ def test_pairs_align_in_space_and_recover_the_lapse_rate(
     lat, lon = global_grid
     geopotential = xr.DataArray(
         coarse_terrain(lat[:, None], lon[None, :]) * 9.80665,
-        dims=("lat", "lon"), coords={"lat": lat, "lon": lon},
+        dims=("lat", "lon"),
+        coords={"lat": lat, "lon": lon},
     )
     status = build_pairs.main(
         ["--config", str(config_path), "--target", str(downloaded_target), "--out", config.paths.pairs],
-        source=analysis_source, geopotential=geopotential,
+        source=analysis_source,
+        geopotential=geopotential,
     )
     assert status == 0
     reports = [json.loads(line) for line in open(Path(config.paths.pairs) / "month_reports.jsonl")]
@@ -237,17 +249,17 @@ def test_pairs_align_in_space_and_recover_the_lapse_rate(
     assert np.abs(static.era5_orography.values - expected).max() < 25
 
 
-def test_pairs_consolidation_computes_statistics(
-    config, config_path, downloaded_target, analysis_source, global_grid
-):
+def test_pairs_consolidation_computes_statistics(config, config_path, downloaded_target, analysis_source, global_grid):
     lat, lon = global_grid
     geopotential = xr.DataArray(
         coarse_terrain(lat[:, None], lon[None, :]) * 9.80665,
-        dims=("lat", "lon"), coords={"lat": lat, "lon": lon},
+        dims=("lat", "lon"),
+        coords={"lat": lat, "lon": lon},
     )
     build_pairs.main(
         ["--config", str(config_path), "--target", str(downloaded_target), "--out", config.paths.pairs],
-        source=analysis_source, geopotential=geopotential,
+        source=analysis_source,
+        geopotential=geopotential,
     )
     stats = build_pairs.consolidate(config, Path(config.paths.pairs))
     assert stats["n_train_steps"] == 365 * 4
@@ -274,11 +286,22 @@ def test_downscaling_produces_an_ensemble_on_the_fine_grid(
     config, config_path, forecast_store, trained_model, static_fields
 ):
     downscale_forecasts, _ = torch_modules()
-    status = downscale_forecasts.main([
-        "--config", str(config_path), "--model", str(trained_model),
-        "--forecasts", *sorted(str(p) for p in forecast_store.glob("*.zarr")),
-        "--out", config.paths.downscaled, "--samples", "3", "--device", "cpu",
-    ])
+    status = downscale_forecasts.main(
+        [
+            "--config",
+            str(config_path),
+            "--model",
+            str(trained_model),
+            "--forecasts",
+            *sorted(str(p) for p in forecast_store.glob("*.zarr")),
+            "--out",
+            config.paths.downscaled,
+            "--samples",
+            "3",
+            "--device",
+            "cpu",
+        ]
+    )
     assert status == 0
     result = xr.open_zarr(Path(config.paths.downscaled) / "forecast_2023-08-05.zarr")
     height, width = static_fields["lat"].shape
@@ -292,11 +315,20 @@ def test_downscaling_produces_an_ensemble_on_the_fine_grid(
     import movie_hourly
 
     movie = Path(config.paths.downscaled) / "spatial.gif"
-    status = movie_hourly.main([
-        "--config", str(config_path), "--forecast", str(forecast_store / "forecast_2023-08-05.zarr"),
-        "--downscaled", str(Path(config.paths.downscaled) / "forecast_2023-08-05.zarr"), "--hours", "2",
-        "--out", str(movie),
-    ])
+    status = movie_hourly.main(
+        [
+            "--config",
+            str(config_path),
+            "--forecast",
+            str(forecast_store / "forecast_2023-08-05.zarr"),
+            "--downscaled",
+            str(Path(config.paths.downscaled) / "forecast_2023-08-05.zarr"),
+            "--hours",
+            "2",
+            "--out",
+            str(movie),
+        ]
+    )
     assert status == 0 and movie.stat().st_size > 0
 
 
@@ -309,17 +341,41 @@ def test_fetched_aifs_ens_forecasts_can_be_downscaled(config, config_path, train
         {"init_time": "time", "ensemble_member": "ensemble", "latitude": "lat", "longitude": "lon"}
     )
     out = tmp_path / "forecasts"
-    args = ["--config", str(config_path), "--start", "2025-08-01", "--end", "2025-08-01", "--out", str(out),
-            "--members", "2", "--max-lead-hours", "12"]
+    args = [
+        "--config",
+        str(config_path),
+        "--start",
+        "2025-08-01",
+        "--end",
+        "2025-08-01",
+        "--out",
+        str(out),
+        "--members",
+        "2",
+        "--max-lead-hours",
+        "12",
+    ]
     assert fetch_forecasts.main(args, archive=archive) == 0
     stores = sorted(out.glob("*.zarr"))
     assert [p.name for p in stores] == ["aifs-ens_20250801T0000.zarr", "aifs-ens_20250801T1200.zarr"]
     assert fetch_forecasts.main(args, archive=archive) == 0
 
-    status = downscale_forecasts.main([
-        "--config", str(config_path), "--model", str(trained_model), "--forecasts", str(stores[0]),
-        "--out", config.paths.downscaled, "--samples", "2", "--device", "cpu",
-    ])
+    status = downscale_forecasts.main(
+        [
+            "--config",
+            str(config_path),
+            "--model",
+            str(trained_model),
+            "--forecasts",
+            str(stores[0]),
+            "--out",
+            config.paths.downscaled,
+            "--samples",
+            "2",
+            "--device",
+            "cpu",
+        ]
+    )
     assert status == 0
     result = xr.open_zarr(Path(config.paths.downscaled) / stores[0].name)
     assert result.t2m_ds.shape == (1, 3, 2, 2, *static_fields["lat"].shape)
@@ -331,11 +387,20 @@ def test_downscaling_refuses_an_unfinished_forecast(config, config_path, forecas
     marker = forecast_store / "forecast_2023-08-05.zarr.done"
     marker.unlink()
     with pytest.raises(RuntimeError, match="no .done marker"):
-        downscale_forecasts.main([
-            "--config", str(config_path), "--model", str(trained_model),
-            "--forecasts", str(forecast_store / "forecast_2023-08-05.zarr"),
-            "--out", config.paths.downscaled, "--device", "cpu",
-        ])
+        downscale_forecasts.main(
+            [
+                "--config",
+                str(config_path),
+                "--model",
+                str(trained_model),
+                "--forecasts",
+                str(forecast_store / "forecast_2023-08-05.zarr"),
+                "--out",
+                config.paths.downscaled,
+                "--device",
+                "cpu",
+            ]
+        )
 
 
 class _StationProvider:
@@ -348,11 +413,17 @@ class _StationProvider:
         self.lat = rng.uniform(42, 50.5, n)
         self.lon = rng.uniform(-4, 8.5, n)
         self.elevation = (terrain(self.lat, self.lon) + rng.uniform(-100, 500, n)).clip(0)
-        self.table = pd.DataFrame({
-            "station_id": [f"{i:08d}" for i in range(n)], "name": "station",
-            "latitude": self.lat, "longitude": self.lon, "elevation": self.elevation,
-            "start_date": pd.Timestamp("2000-01-01"), "end_date": pd.NaT,
-        })
+        self.table = pd.DataFrame(
+            {
+                "station_id": [f"{i:08d}" for i in range(n)],
+                "name": "station",
+                "latitude": self.lat,
+                "longitude": self.lon,
+                "elevation": self.elevation,
+                "start_date": pd.Timestamp("2000-01-01"),
+                "end_date": pd.NaT,
+            }
+        )
 
     def list_stations(self, region, start, end, variables):
         return self.table.copy()
@@ -363,12 +434,21 @@ class _StationProvider:
         for station_id in ids:
             index = int(station_id)
             values = (
-                300 - 0.0065 * self.elevation[index] + diurnal(hours.hour)
+                300
+                - 0.0065 * self.elevation[index]
+                + diurnal(hours.hour)
                 + np.random.default_rng(index).normal(0, 1.2, len(hours))
             )
-            rows.append(pd.DataFrame({
-                "station_id": station_id, "variable": "t2m", "time": hours, "value": values,
-            }))
+            rows.append(
+                pd.DataFrame(
+                    {
+                        "station_id": station_id,
+                        "variable": "t2m",
+                        "time": hours,
+                        "value": values,
+                    }
+                )
+            )
         return pd.concat(rows, ignore_index=True)
 
 
@@ -376,11 +456,22 @@ def test_evaluation_compares_both_forecasts_and_the_reading_paths_agree(
     config, config_path, forecast_store, trained_model
 ):
     downscale_forecasts, _ = torch_modules()
-    downscale_forecasts.main([
-        "--config", str(config_path), "--model", str(trained_model),
-        "--forecasts", *sorted(str(p) for p in forecast_store.glob("*.zarr")),
-        "--out", config.paths.downscaled, "--samples", "3", "--device", "cpu",
-    ])
+    downscale_forecasts.main(
+        [
+            "--config",
+            str(config_path),
+            "--model",
+            str(trained_model),
+            "--forecasts",
+            *sorted(str(p) for p in forecast_store.glob("*.zarr")),
+            "--out",
+            config.paths.downscaled,
+            "--samples",
+            "3",
+            "--device",
+            "cpu",
+        ]
+    )
     config.evaluation.n_bootstrap = 20
     summary = eval_downscaled.run(
         config,
@@ -391,8 +482,12 @@ def test_evaluation_compares_both_forecasts_and_the_reading_paths_agree(
     )
     out = Path(config.paths.evaluation)
     for name in (
-        "by_lead.csv", "by_region_elevation.csv", "heat_events.csv",
-        "summary.json", "scorecard.png", "heatwave_map.png",
+        "by_lead.csv",
+        "by_region_elevation.csv",
+        "heat_events.csv",
+        "summary.json",
+        "scorecard.png",
+        "heatwave_map.png",
     ):
         assert (out / name).stat().st_size > 0
     by_lead = pd.read_csv(out / "by_lead.csv").pivot(index="lead_h", columns="method", values="rmse")
@@ -403,11 +498,22 @@ def test_evaluation_compares_both_forecasts_and_the_reading_paths_agree(
 
 def test_evaluation_rejects_a_stale_downscaled_store(config, config_path, forecast_store, trained_model):
     downscale_forecasts, _ = torch_modules()
-    downscale_forecasts.main([
-        "--config", str(config_path), "--model", str(trained_model),
-        "--forecasts", str(forecast_store / "forecast_2023-08-05.zarr"),
-        "--out", config.paths.downscaled, "--samples", "2", "--device", "cpu",
-    ])
+    downscale_forecasts.main(
+        [
+            "--config",
+            str(config_path),
+            "--model",
+            str(trained_model),
+            "--forecasts",
+            str(forecast_store / "forecast_2023-08-05.zarr"),
+            "--out",
+            config.paths.downscaled,
+            "--samples",
+            "2",
+            "--device",
+            "cpu",
+        ]
+    )
     path = Path(config.paths.downscaled) / "forecast_2023-08-05.zarr"
     truncated = xr.open_zarr(path).isel(ensemble=slice(0, 2)).load()
     import shutil
@@ -418,14 +524,14 @@ def test_evaluation_rejects_a_stale_downscaled_store(config, config_path, foreca
         {"t2m": (("time", "station"), np.full((5, 1), 300.0, "f4"))},
         coords={
             "time": pd.date_range("2023-08-05", periods=5, freq="6h").to_numpy().astype("datetime64[ns]"),
-            "station": ["a"], "latitude": ("station", [45.0]), "longitude": ("station", [2.0]),
+            "station": ["a"],
+            "latitude": ("station", [45.0]),
+            "longitude": ("station", [2.0]),
             "elevation": ("station", [300.0]),
         },
     )
     with pytest.raises(ValueError, match="stale"):
-        eval_downscaled.at_stations(
-            forecast_store / "forecast_2023-08-05.zarr", path, stations, "t2m"
-        )
+        eval_downscaled.at_stations(forecast_store / "forecast_2023-08-05.zarr", path, stations, "t2m")
 
 
 def test_spectrum_script_reports_a_ratio_to_the_target(config_path, tmp_path, trained_model, static_fields):
@@ -446,10 +552,26 @@ def test_spectrum_script_reports_a_ratio_to_the_target(config_path, tmp_path, tr
     ).to_zarr(pairs / "months" / "pairs_201407.zarr")
 
     out = Path(tmp_path) / "spectrum"
-    status = check_spectrum.main([
-        "--config", str(config_path), "--model", str(trained_model), "--pairs", str(pairs),
-        "--out", str(out), "--n-times", "4", "--hour", "12", "--members", "3", "--device", "cpu",
-    ])
+    status = check_spectrum.main(
+        [
+            "--config",
+            str(config_path),
+            "--model",
+            str(trained_model),
+            "--pairs",
+            str(pairs),
+            "--out",
+            str(out),
+            "--n-times",
+            "4",
+            "--hour",
+            "12",
+            "--members",
+            "3",
+            "--device",
+            "cpu",
+        ]
+    )
     assert status == 0
     for name in ("spectrum.csv", "spectrum.png", "spectrum.json"):
         assert (out / name).stat().st_size > 0
@@ -457,13 +579,14 @@ def test_spectrum_script_reports_a_ratio_to_the_target(config_path, tmp_path, tr
     assert {"target", "coarse", "model member", "model mean"} <= set(comparison.columns)
     assert (comparison.wavelength_km.diff().dropna() < 0).all()
 
+
 def test_hourly_forecasts_are_written_for_every_hour_and_scored_against_stations(
     config, config_path, forecast_store, trained_model, static_fields, stats, tmp_path
 ):
     torch_modules()
+    import downscale_hourly
     import torch
 
-    import downscale_hourly
     from downscale import hourly
 
     torch.manual_seed(0)
@@ -474,11 +597,24 @@ def test_hourly_forecasts_are_written_for_every_hour_and_scored_against_stations
     hourly_path = tmp_path / "hourly.pt"
     hourly.HourlyDownscaler(net, {**stats, "tendency": {"mean": 0.0, "std": 2.0}}, static_fields).save(hourly_path)
     out = tmp_path / "hourly_out"
-    status = downscale_hourly.main([
-        "--config", str(config_path), "--hourly", str(hourly_path), "--spatial", str(trained_model),
-        "--forecasts", *sorted(str(p) for p in forecast_store.glob("*.zarr")),
-        "--out", str(out), "--samples", "2", "--device", "cpu",
-    ])
+    status = downscale_hourly.main(
+        [
+            "--config",
+            str(config_path),
+            "--hourly",
+            str(hourly_path),
+            "--spatial",
+            str(trained_model),
+            "--forecasts",
+            *sorted(str(p) for p in forecast_store.glob("*.zarr")),
+            "--out",
+            str(out),
+            "--samples",
+            "2",
+            "--device",
+            "cpu",
+        ]
+    )
     assert status == 0
     name = "forecast_2023-08-05.zarr"
     coarse = xr.open_zarr(out / "forecasts" / name)
@@ -491,8 +627,11 @@ def test_hourly_forecasts_are_written_for_every_hour_and_scored_against_stations
 
     config.evaluation.n_bootstrap = 20
     summary = eval_downscaled.run(
-        config, sorted(str(p) for p in (out / "forecasts").glob("*.zarr")),
-        sorted(str(p) for p in (out / "hourly").glob("*.zarr")), tmp_path / "eval", provider=_StationProvider(),
+        config,
+        sorted(str(p) for p in (out / "forecasts").glob("*.zarr")),
+        sorted(str(p) for p in (out / "hourly").glob("*.zarr")),
+        tmp_path / "eval",
+        provider=_StationProvider(),
     )
     by_lead = pd.read_csv(tmp_path / "eval" / "by_lead.csv")
     assert sorted(by_lead.lead_h.unique())[:3] == [6, 7, 8]
@@ -501,7 +640,18 @@ def test_hourly_forecasts_are_written_for_every_hour_and_scored_against_stations
     import movie_hourly
 
     movie = tmp_path / "movie.gif"
-    status = movie_hourly.main([
-        "--config", str(config_path), "--run", str(out), "--name", name, "--hours", "3", "--out", str(movie),
-    ])
+    status = movie_hourly.main(
+        [
+            "--config",
+            str(config_path),
+            "--run",
+            str(out),
+            "--name",
+            name,
+            "--hours",
+            "3",
+            "--out",
+            str(movie),
+        ]
+    )
     assert status == 0 and movie.stat().st_size > 0

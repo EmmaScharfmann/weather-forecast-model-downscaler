@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+
 eccodes = pytest.importorskip("eccodes")
 
 from downscale import open_data  # noqa: E402
@@ -23,9 +24,14 @@ def message(number: int, value: float) -> bytes:
     """
     handle = eccodes.codes_grib_new_from_samples("regular_ll_sfc_grib2")
     for key, v in {
-        "Ni": 360, "Nj": 181, "latitudeOfFirstGridPointInDegrees": 90.0, "latitudeOfLastGridPointInDegrees": -90.0,
-        "longitudeOfFirstGridPointInDegrees": 0.0, "longitudeOfLastGridPointInDegrees": 359.0,
-        "iDirectionIncrementInDegrees": 1.0, "jDirectionIncrementInDegrees": 1.0,
+        "Ni": 360,
+        "Nj": 181,
+        "latitudeOfFirstGridPointInDegrees": 90.0,
+        "latitudeOfLastGridPointInDegrees": -90.0,
+        "longitudeOfFirstGridPointInDegrees": 0.0,
+        "longitudeOfLastGridPointInDegrees": 359.0,
+        "iDirectionIncrementInDegrees": 1.0,
+        "jDirectionIncrementInDegrees": 1.0,
     }.items():
         eccodes.codes_set(handle, key, v)
     if number:
@@ -61,14 +67,19 @@ class Bucket:
     def __call__(self, url, byte_range=None):
         self.reads.append(url)
         data = self.files[url]
-        return data if byte_range is None else data[byte_range[0]:byte_range[0] + byte_range[1]]
+        return data if byte_range is None else data[byte_range[0] : byte_range[0] + byte_range[1]]
 
 
 @pytest.mark.parametrize("model", ["aifs-ens", "ifs-ens"])
 def test_members_and_lead_times_are_read_and_cropped_to_the_region(model):
     bucket = Bucket([6, 12], n_perturbed=4, model=model)
     da = open_data.fetch_open_data(
-        "2025-08-01T00", (40.0, 50.0, -5.0, 10.0), members=3, max_lead_hours=12, base="mem://", get=bucket,
+        "2025-08-01T00",
+        (40.0, 50.0, -5.0, 10.0),
+        members=3,
+        max_lead_hours=12,
+        base="mem://",
+        get=bucket,
         model=model,
     )
     assert da.dims == ("time", "lead_time", "ensemble", "lat", "lon") and da.shape == (1, 2, 3, 11, 16)

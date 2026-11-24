@@ -14,12 +14,14 @@ model's context ring.
     python scripts/precipitation_obs_eval.py --pairs data/precipitation/obs_test/test.zarr \
         --model hf://EmmaScharfmann/france-precipitation-downscaler/model.pt --out outputs/precipitation_obs_eval
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import sys
 from pathlib import Path
+
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
@@ -33,6 +35,7 @@ from downscale.rain_obs import at_stations, gauge_lag_check, gauge_matrix, load_
 def resolve_model(path):
     if str(path).startswith("hf://"):
         from huggingface_hub import hf_hub_download
+
         parts = str(path)[5:].split("/")
         return hf_hub_download("/".join(parts[:2]), "/".join(parts[2:]) or "model.pt")
     return path
@@ -41,8 +44,10 @@ def resolve_model(path):
 def forecasts(pairs, model=None, predictions=None, members=8, seed=2):
     """All compared forecasts as (time, member, lat, lon) arrays in mm."""
     from downscale.rain_temporal import hourly_baseline
+
     if predictions is None:
         from downscale.precipitation import predict
+
         predictions = predict(resolve_model(model), pairs, members=members, noise_seed=seed)
     rain = predictions.precipitation
     for name in ("time", "lat", "lon"):
@@ -61,8 +66,11 @@ def forecasts(pairs, model=None, predictions=None, members=8, seed=2):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--pairs", required=True, help="test pack (zarr) with ERA5 predictors and PARDIG target")
-    parser.add_argument("--model", default="hf://EmmaScharfmann/france-precipitation-downscaler/model.pt",
-                        help="model.pt path or hf://user/repo/model.pt")
+    parser.add_argument(
+        "--model",
+        default="hf://EmmaScharfmann/france-precipitation-downscaler/model.pt",
+        help="model.pt path or hf://user/repo/model.pt",
+    )
     parser.add_argument("--predictions", help="existing predictions.zarr, instead of running the model")
     parser.add_argument("--members", type=int, default=8)
     parser.add_argument("--seed", type=int, default=2, help="noise seed; matches evaluation_noise_seed")
@@ -83,7 +91,7 @@ def main():
     # References on the rainfall grid, restricted to the same cells.
     m = args.margin
     ring = np.zeros((len(lat), len(lon)), dtype=bool)
-    ring[m:-m or None, m:-m or None] = True
+    ring[m : -m or None, m : -m or None] = True
     radar = None if args.no_radar else load_euradclim(times, lat, lon, args.cache)
     observed = np.broadcast_to(ring, (len(times), *ring.shape)).copy() if radar is None else np.isfinite(radar) & ring
     if radar is not None:
@@ -92,11 +100,18 @@ def main():
     gauges = load_gauges(times, args.cache, bbox=(lat[m], lat[-m - 1], lon[m], lon[-m - 1]))
     gauge_values, stations = gauge_matrix(gauges, times, lat, lon)
 
-    report = {"pairs": str(args.pairs), "model": str(args.model or args.predictions), "members": args.members,
-              "hours": len(times), "days": sorted({str(t.date()) for t in times - pd.Timedelta(hours=1)}),
-              "cell_km": cell_km, "gridded_cells": int(observed.any(0).sum()), "stations": len(stations),
-              "gauge_lag_correlation": None if radar is None else gauge_lag_check(gauge_values, stations, radar),
-              "scores": {}}
+    report = {
+        "pairs": str(args.pairs),
+        "model": str(args.model or args.predictions),
+        "members": args.members,
+        "hours": len(times),
+        "days": sorted({str(t.date()) for t in times - pd.Timedelta(hours=1)}),
+        "cell_km": cell_km,
+        "gridded_cells": int(observed.any(0).sum()),
+        "stations": len(stations),
+        "gauge_lag_correlation": None if radar is None else gauge_lag_check(gauge_values, stations, radar),
+        "scores": {},
+    }
     references = {"PARDIG": (pardig, True), "EURADCLIM": (radar, True), "Gauges": (gauge_values, False)}
     references = {k: v for k, v in references.items() if v[0] is not None}
     for ref_name, (reference, gridded) in references.items():
@@ -112,9 +127,15 @@ def main():
     box = metrics.complete_box(pardig)
     if box is not None:
         r, c, s, hours = box
-        crop = lambda a: a[hours][..., r:r + s, c:c + s]
-        report["spectrum_box"] = {"lat": [float(lat[r]), float(lat[r + s - 1])], "lon": [float(lon[c]), float(lon[c + s - 1])],
-                                  "hours": int(hours.sum())}
+
+        def crop(a):
+            return a[hours][..., r : r + s, c : c + s]
+
+        report["spectrum_box"] = {
+            "lat": [float(lat[r]), float(lat[r + s - 1])],
+            "lon": [float(lon[c]), float(lon[c + s - 1])],
+            "hours": int(hours.sum()),
+        }
         report["spectra"] = {} if radar is None else {"EURADCLIM": metrics.spectrum(crop(radar), cell_km)}
         for name, forecast in models.items():
             report["spectra"][name] = metrics.spectrum(crop(forecast).reshape(-1, s, s), cell_km)
@@ -126,15 +147,23 @@ def main():
 
 
 def tables(report):
-    rows = [("Bias (mm)", "amount", "bias_mm"), ("MAE (mm)", "amount", "mae_mm"), ("RMSE (mm)", "amount", "rmse_mm"),
-            ("CRPS (mm)", "probability", "ensemble_crps_mm"),
-            ("CSI ≥1 mm", "occurrence", "csi_1mm"), ("CSI ≥5 mm", "occurrence", "csi_5mm"),
-            ("Frequency bias ≥1 mm", "occurrence", "frequency_bias_1mm"),
-            ("Useful scale ≥1 mm (km)", "structure", "useful_scale_km_1mm"),
-            ("Useful scale ≥5 mm (km)", "structure", "useful_scale_km_5mm"),
-            ("99th percentile (mm)", "intensity", "q99_mm"), ("99.9th percentile (mm)", "intensity", "q99.9_mm")]
-    text = [f"Hours: {report['hours']} ({', '.join(report['days'])}); stations: {report['stations']}; "
-            f"gridded cells: {report['gridded_cells']}\n"]
+    rows = [
+        ("Bias (mm)", "amount", "bias_mm"),
+        ("MAE (mm)", "amount", "mae_mm"),
+        ("RMSE (mm)", "amount", "rmse_mm"),
+        ("CRPS (mm)", "probability", "ensemble_crps_mm"),
+        ("CSI ≥1 mm", "occurrence", "csi_1mm"),
+        ("CSI ≥5 mm", "occurrence", "csi_5mm"),
+        ("Frequency bias ≥1 mm", "occurrence", "frequency_bias_1mm"),
+        ("Useful scale ≥1 mm (km)", "structure", "useful_scale_km_1mm"),
+        ("Useful scale ≥5 mm (km)", "structure", "useful_scale_km_5mm"),
+        ("99th percentile (mm)", "intensity", "q99_mm"),
+        ("99.9th percentile (mm)", "intensity", "q99.9_mm"),
+    ]
+    text = [
+        f"Hours: {report['hours']} ({', '.join(report['days'])}); stations: {report['stations']}; "
+        f"gridded cells: {report['gridded_cells']}\n"
+    ]
     for ref, scores in report["scores"].items():
         names = list(scores)
         first = scores[names[0]]
@@ -146,18 +175,33 @@ def tables(report):
                 continue
             values = [scores[n][group][key] for n in names]
             ref_value = first[group].get(f"reference_{key}", "")
-            fmt = lambda v: "—" if v is None else (f"{v:.3f}" if isinstance(v, float) else str(v))
-            text.append(f"| {label} | " + " | ".join(fmt(v) for v in values) + f" | {fmt(ref_value) if ref_value != '' else ''} |")
+
+            def fmt(v):
+                return "—" if v is None else (f"{v:.3f}" if isinstance(v, float) else str(v))
+
+            text.append(
+                f"| {label} | "
+                + " | ".join(fmt(v) for v in values)
+                + f" | {fmt(ref_value) if ref_value != '' else ''} |"
+            )
     return "\n".join(text) + "\n"
 
 
 def figures(report, models, radar, pairs, out):
     """FSS vs scale, spectra, wet-tail Q-Q and maps of the wettest hour."""
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    colors = {"ERA5 interval mean": "#999999", "ERA5 smooth (PCHIP)": "#555555", "PARDIG": "#1f77b4",
-              "Downscaler (members)": "#d62728", "Downscaler (ensemble mean)": "#ff9896", "EURADCLIM": "black"}
+
+    colors = {
+        "ERA5 interval mean": "#999999",
+        "ERA5 smooth (PCHIP)": "#555555",
+        "PARDIG": "#1f77b4",
+        "Downscaler (members)": "#d62728",
+        "Downscaler (ensemble mean)": "#ff9896",
+        "EURADCLIM": "black",
+    }
 
     grid_ref = "EURADCLIM" if "EURADCLIM" in report["scores"] else "PARDIG"
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
@@ -165,7 +209,9 @@ def figures(report, models, radar, pairs, out):
         for name, s in report["scores"][grid_ref].items():
             ax.plot(s["structure"]["sizes_km"], s["structure"][f"fss_{t}"], "o-", label=name, color=colors.get(name))
         ax.axhline(next(iter(report["scores"][grid_ref].values()))["structure"][f"useful_fss_{t}"], ls=":", c="k")
-        ax.set(xscale="log", xlabel="neighbourhood size (km)", ylabel="FSS", title=f"FSS vs {grid_ref}, ≥{t[:-2]} mm/h")
+        ax.set(
+            xscale="log", xlabel="neighbourhood size (km)", ylabel="FSS", title=f"FSS vs {grid_ref}, ≥{t[:-2]} mm/h"
+        )
     axes[0].legend(fontsize=7)
     fig.tight_layout()
     fig.savefig(out / "fss_vs_scale.png", dpi=150)
@@ -187,16 +233,21 @@ def figures(report, models, radar, pairs, out):
             ax.plot(s["qq"]["reference"], s["qq"]["forecast"], label=name, color=colors.get(name))
             top = max(top, max(s["qq"]["reference"]), max(s["qq"]["forecast"]))
         ax.plot([0, top], [0, top], "k:")
-        ax.set(xlabel=f"{ref} quantile (mm/h)", ylabel="forecast quantile (mm/h)", title=f"Wet tail (90-99.99%) vs {ref}")
+        ax.set(
+            xlabel=f"{ref} quantile (mm/h)", ylabel="forecast quantile (mm/h)", title=f"Wet tail (90-99.99%) vs {ref}"
+        )
     axes[0].legend(fontsize=7)
     fig.tight_layout()
     fig.savefig(out / "qq.png", dpi=150)
 
     wettest = int(np.nanargmax(np.nanmean(radar, (1, 2))))
-    panels = {"ERA5 interval mean": models["ERA5 interval mean"][wettest, 0],
-              "Downscaler (one member)": models["Downscaler (members)"][wettest, 0],
-              "Downscaler (ensemble mean)": models["Downscaler (ensemble mean)"][wettest, 0],
-              "PARDIG": models["PARDIG"][wettest, 0], grid_ref: radar[wettest]}
+    panels = {
+        "ERA5 interval mean": models["ERA5 interval mean"][wettest, 0],
+        "Downscaler (one member)": models["Downscaler (members)"][wettest, 0],
+        "Downscaler (ensemble mean)": models["Downscaler (ensemble mean)"][wettest, 0],
+        "PARDIG": models["PARDIG"][wettest, 0],
+        grid_ref: radar[wettest],
+    }
     fig, axes = plt.subplots(1, 5, figsize=(17, 3.6), constrained_layout=True)
     extent = [pairs.lon.values[0], pairs.lon.values[-1], pairs.lat.values[0], pairs.lat.values[-1]]
     vmax = max(1.0, float(np.nanquantile(radar[wettest], 0.995)))

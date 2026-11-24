@@ -15,6 +15,7 @@ from .constants import MAX_FRACTION_OUTSIDE
 from .downscaler import Downscaler
 from .station_interp import GridInterpolator
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,9 +35,7 @@ def to_fine_grid(forecast: xr.DataArray, lat2d: np.ndarray, lon2d: np.ndarray) -
     :rtype: numpy.ndarray
     :raises ValueError: If too much of the fine grid lies outside the forecast domain.
     """
-    interp = GridInterpolator.build(
-        forecast["lat"].values, forecast["lon"].values, lat2d.ravel(), lon2d.ravel()
-    )
+    interp = GridInterpolator.build(forecast["lat"].values, forecast["lon"].values, lat2d.ravel(), lon2d.ravel())
     fraction_outside = 1 - interp.inside.mean()
     if fraction_outside > MAX_FRACTION_OUTSIDE:
         raise ValueError(
@@ -53,9 +52,7 @@ def to_fine_grid(forecast: xr.DataArray, lat2d: np.ndarray, lon2d: np.ndarray) -
     return out.values.reshape(*out.shape[:-1], *lat2d.shape)
 
 
-def downscale_forecast(
-    model: Downscaler, forecast: xr.DataArray, samples: int = 4, batch: int = 8
-) -> xr.Dataset:
+def downscale_forecast(model: Downscaler, forecast: xr.DataArray, samples: int = 4, batch: int = 8) -> xr.Dataset:
     """Downscale every member of an ensemble forecast.
 
     Each coarse member is interpolated onto the fine grid, then passed through the
@@ -93,8 +90,11 @@ def downscale_forecast(
         {
             "t2m_interp": (("time", "lead_time", "ensemble", "y", "x"), coarse, {"units": "K"}),
             "t2m_ds": (("time", "lead_time", "ensemble", "sample", "y", "x"), fine, {"units": "K"}),
-            "land_sea_mask": (("y", "x"), model.static["land_sea_mask"].astype("f4"),
-                              {"long_name": "land fraction of the fine grid cell"}),
+            "land_sea_mask": (
+                ("y", "x"),
+                model.static["land_sea_mask"].astype("f4"),
+                {"long_name": "land fraction of the fine grid cell"},
+            ),
             "orography": (("y", "x"), model.static["cerra_orography"].astype("f4"), {"units": "m"}),
         },
         coords={

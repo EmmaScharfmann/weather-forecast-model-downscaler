@@ -46,4 +46,13 @@ packages = ["downscale"]
 weatherbenchX = { git = "https://github.com/google-research/weatherbenchX.git" }
 
 [dependency-groups]
-dev = ["pytest"]
+dev = ["jupyterlab", "pytest", "ruff"]
+
+[tool.ruff]
+line-length = 119
+
+[tool.ruff.lint]
+select = ["C", "E", "F", "I", "W", "UP"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2

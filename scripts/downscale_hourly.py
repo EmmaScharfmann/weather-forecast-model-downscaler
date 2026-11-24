@@ -27,14 +27,15 @@ import logging
 import shutil
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import xarray as xr
 
 from downscale import hourly as hr
 from downscale.config import load_config
 from downscale.inference import downscale_forecast
+
 
 logger = logging.getLogger("downscale_hourly")
 
@@ -119,8 +120,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     cfg = load_config(args.config)
-    forecasts = sorted(args.forecasts) if args.forecasts else sorted(
-        str(p) for p in Path(cfg.paths.forecasts).glob("*.zarr")
+    forecasts = (
+        sorted(args.forecasts) if args.forecasts else sorted(str(p) for p in Path(cfg.paths.forecasts).glob("*.zarr"))
     )
     if not forecasts:
         parser.error("no forecasts found; pass --forecasts or set paths.forecasts")

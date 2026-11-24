@@ -10,11 +10,12 @@ in the interior.
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
 import xarray as xr
+
 
 logger = logging.getLogger(__name__)
 
@@ -110,14 +111,16 @@ def edge_profile(
             continue
         mean_correction = float(np.nanmean(correction[:, ring]))
         mean_spread = float(np.nanmean(spread[:, ring]))
-        rows.append({
-            "distance_cells": d,
-            "n_points": int(ring.sum()),
-            "mean_abs_correction_K": mean_correction,
-            "mean_spread_K": mean_spread,
-            "correction_ratio": mean_correction / reference_correction if reference_correction else np.nan,
-            "spread_ratio": mean_spread / reference_spread if reference_spread else np.nan,
-        })
+        rows.append(
+            {
+                "distance_cells": d,
+                "n_points": int(ring.sum()),
+                "mean_abs_correction_K": mean_correction,
+                "mean_spread_K": mean_spread,
+                "correction_ratio": mean_correction / reference_correction if reference_correction else np.nan,
+                "spread_ratio": mean_spread / reference_spread if reference_spread else np.nan,
+            }
+        )
     profile = pd.DataFrame(rows)
     profile.attrs["interior_correction_K"] = reference_correction
     profile.attrs["interior_spread_K"] = reference_spread
@@ -139,9 +142,7 @@ def suggested_margin(profile: pd.DataFrame, tolerance: float = 0.1) -> int:
     :rtype: int
     """
     ordered = profile.sort_values("distance_cells")
-    within = (
-        (ordered.spread_ratio - 1).abs().le(tolerance) & (ordered.correction_ratio - 1).abs().le(tolerance)
-    )
+    within = (ordered.spread_ratio - 1).abs().le(tolerance) & (ordered.correction_ratio - 1).abs().le(tolerance)
     settled = ordered.distance_cells[within.values]
     return int(settled.iloc[0]) if len(settled) else int(ordered.distance_cells.max()) + 1
 
@@ -197,10 +198,7 @@ def sea_report(downscaled: xr.Dataset) -> dict:
     coarse = downscaled["t2m_interp"].values
     fine = downscaled["t2m_ds"].values
     correction = np.abs(fine.mean(axis=-3) - coarse).reshape(-1, *mask.shape)
-    spread = (
-        fine.std(axis=-3, ddof=1).reshape(-1, *mask.shape)
-        if fine.shape[-3] > 1 else np.zeros_like(correction)
-    )
+    spread = fine.std(axis=-3, ddof=1).reshape(-1, *mask.shape) if fine.shape[-3] > 1 else np.zeros_like(correction)
     out = {
         "land_fraction": float(mask.mean()),
         "land_correction_K": float(np.nanmean(correction[:, mask])),
@@ -260,7 +258,7 @@ def power_spectrum(fields: np.ndarray, spacing_km: float, n_bins: int = 40) -> p
     n, ny, nx = fields.shape
     y, x = np.meshgrid(np.arange(ny), np.arange(nx), indexing="ij")
     window = np.outer(np.hanning(ny), np.hanning(nx))
-    correction = np.mean(window ** 2)
+    correction = np.mean(window**2)
 
     design = np.stack([np.ones(ny * nx), y.ravel(), x.ravel()], 1)
     pseudo_inverse = np.linalg.pinv(design)
@@ -274,7 +272,7 @@ def power_spectrum(fields: np.ndarray, spacing_km: float, n_bins: int = 40) -> p
 
     ky = np.fft.fftfreq(ny, d=spacing_km)[:, None]
     kx = np.fft.fftfreq(nx, d=spacing_km)[None, :]
-    wavenumber = np.sqrt(ky ** 2 + kx ** 2)
+    wavenumber = np.sqrt(ky**2 + kx**2)
     nyquist = 1.0 / (2 * spacing_km)
     smallest = 1.0 / max(ny, nx) / spacing_km
     edges = np.logspace(np.log10(smallest), np.log10(nyquist), n_bins + 1)
@@ -286,12 +284,14 @@ def power_spectrum(fields: np.ndarray, spacing_km: float, n_bins: int = 40) -> p
         if not chosen.any():
             continue
         centre = np.sqrt(edges[b] * edges[b + 1])
-        rows.append({
-            "wavenumber_per_km": centre,
-            "wavelength_km": 1.0 / centre,
-            "power": float(flat_power[chosen].mean()),
-            "n_modes": int(chosen.sum()),
-        })
+        rows.append(
+            {
+                "wavenumber_per_km": centre,
+                "wavelength_km": 1.0 / centre,
+                "power": float(flat_power[chosen].mean()),
+                "n_modes": int(chosen.sum()),
+            }
+        )
     return pd.DataFrame(rows).sort_values("wavelength_km", ascending=False).reset_index(drop=True)
 
 
@@ -368,7 +368,9 @@ def spectrum_figure(comparison: pd.DataFrame, labels: list[str], path) -> None:
     ax[0].legend(fontsize=8)
 
     for name in labels[1:]:
-        ax[1].semilogx(comparison.wavelength_km, comparison[name] / comparison[reference], marker="o", ms=2.5, label=name)
+        ax[1].semilogx(
+            comparison.wavelength_km, comparison[name] / comparison[reference], marker="o", ms=2.5, label=name
+        )
     ax[1].axhline(1.0, color="k", lw=0.8, ls="--")
     ax[1].axhline(0.5, color="gray", lw=0.8, ls=":")
     ax[1].set_xlabel("wavelength (km)")
@@ -420,8 +422,12 @@ def temporal_spectrum(fields: dict[str, np.ndarray], land: np.ndarray) -> pd.Dat
 
 
 def space_time_spectrum_figure(
-    spatial: pd.DataFrame, temporal: pd.DataFrame, labels: Sequence[str], path,
-    colours: dict[str, str] | None = None, shown: dict[str, str] | None = None,
+    spatial: pd.DataFrame,
+    temporal: pd.DataFrame,
+    labels: Sequence[str],
+    path,
+    colours: dict[str, str] | None = None,
+    shown: dict[str, str] | None = None,
 ) -> None:
     """Plot spatial and temporal power spectra and their ratio to the first label.
 
@@ -448,16 +454,19 @@ def space_time_spectrum_figure(
     colours, shown = colours or {}, shown or {}
     reference = labels[0]
     fig, ax = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
-    for row, (frame, x, unit, what) in enumerate([
-        (spatial, "wavelength_km", "wavelength (km)", "spatial"),
-        (temporal, "period_h", "period (hours)", "temporal"),
-    ]):
+    for row, (frame, x, unit, what) in enumerate(
+        [
+            (spatial, "wavelength_km", "wavelength (km)", "spatial"),
+            (temporal, "period_h", "period (hours)", "temporal"),
+        ]
+    ):
         for name in labels:
             style = {"color": colours[name]} if name in colours else {}
             ax[row, 0].loglog(frame[x], frame[name], marker="o", ms=2, label=shown.get(name, name), **style)
             if name != reference:
-                ax[row, 1].semilogx(frame[x], frame[name] / frame[reference], marker="o", ms=2,
-                                    label=shown.get(name, name), **style)
+                ax[row, 1].semilogx(
+                    frame[x], frame[name] / frame[reference], marker="o", ms=2, label=shown.get(name, name), **style
+                )
         ax[row, 0].set_title(f"{what} power spectrum over land")
         ax[row, 0].set_ylabel("power")
         ax[row, 1].axhline(1.0, color="k", lw=0.8, ls="--")
@@ -483,9 +492,7 @@ def diverging_white_cmap():
     """
     from matplotlib.colors import LinearSegmentedColormap
 
-    return LinearSegmentedColormap.from_list(
-        "gain", ["#8c2d04", "#d7604d", "#f7f7f7", "#5aae61", "#1b5e20"]
-    )
+    return LinearSegmentedColormap.from_list("gain", ["#8c2d04", "#d7604d", "#f7f7f7", "#5aae61", "#1b5e20"])
 
 
 def add_map_background(axis, extent: tuple[float, float, float, float] | None = None) -> bool:
@@ -543,8 +550,12 @@ def _map_axes(fig, position, extent):
 
 
 def gain_profile(
-    table: pd.DataFrame, by: str, edges: Sequence[float], baseline: str = "coarse",
-    improved: str = "downscaled", unit: str = "m",
+    table: pd.DataFrame,
+    by: str,
+    edges: Sequence[float],
+    baseline: str = "coarse",
+    improved: str = "downscaled",
+    unit: str = "m",
 ) -> pd.DataFrame:
     """Absolute and relative gain from downscaling, grouped into bands.
 
@@ -577,15 +588,17 @@ def gain_profile(
         label = f"{low:.0f}-{high:.0f} {unit}" if high < 1e5 else f"above {low:.0f} {unit}"
         mean_reference = float(reference[chosen].mean())
         mean_gain = float(gain[chosen].mean())
-        rows.append({
-            "band": label,
-            "n_stations": int(chosen.sum()),
-            f"rmse_{baseline}_K": round(mean_reference, 3),
-            f"rmse_{improved}_K": round(float(table[f"rmse_{improved}"].values[chosen].mean()), 3),
-            "mean_gain_K": round(mean_gain, 3),
-            "relative_gain_pct": round(100 * mean_gain / mean_reference, 1) if mean_reference else np.nan,
-            "improved_fraction": round(float((gain[chosen] > 0).mean()), 3),
-        })
+        rows.append(
+            {
+                "band": label,
+                "n_stations": int(chosen.sum()),
+                f"rmse_{baseline}_K": round(mean_reference, 3),
+                f"rmse_{improved}_K": round(float(table[f"rmse_{improved}"].values[chosen].mean()), 3),
+                "mean_gain_K": round(mean_gain, 3),
+                "relative_gain_pct": round(100 * mean_gain / mean_reference, 1) if mean_reference else np.nan,
+                "improved_fraction": round(float((gain[chosen] > 0).mean()), 3),
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -624,7 +637,7 @@ class StationErrors:
             difference = np.where(valid, mean - truth, np.nan)
             entry = self.sums.setdefault(method, np.zeros((3, truth.shape[-1])))
             entry[0] += np.nansum(difference, axis=(0, 1))
-            entry[1] += np.nansum(difference ** 2, axis=(0, 1))
+            entry[1] += np.nansum(difference**2, axis=(0, 1))
             entry[2] += valid.sum(axis=(0, 1))
 
     def table(self) -> pd.DataFrame:
@@ -663,16 +676,26 @@ def station_error_figure(table: pd.DataFrame, methods: Sequence[str], labels: di
 
     limit = float(np.nanpercentile(np.abs(np.concatenate([table[f"bias_{m}"] for m in methods])), 98))
     extent = (
-        float(table.longitude.min()) - 0.6, float(table.longitude.max()) + 0.6,
-        float(table.latitude.min()) - 0.4, float(table.latitude.max()) + 0.4,
+        float(table.longitude.min()) - 0.6,
+        float(table.longitude.max()) + 0.6,
+        float(table.latitude.min()) - 0.4,
+        float(table.latitude.max()) + 0.4,
     )
     fig = plt.figure(figsize=(7 * len(methods), 6.5), constrained_layout=True)
     for position, method in enumerate(methods, start=1):
         axis, _ = _map_axes(fig, (1, len(methods), position), extent)
         add_map_background(axis, extent)
         points = axis.scatter(
-            table.longitude, table.latitude, c=table[f"bias_{method}"], cmap="RdBu_r",
-            vmin=-limit, vmax=limit, s=14, edgecolors="k", linewidths=0.2, zorder=3,
+            table.longitude,
+            table.latitude,
+            c=table[f"bias_{method}"],
+            cmap="RdBu_r",
+            vmin=-limit,
+            vmax=limit,
+            s=14,
+            edgecolors="k",
+            linewidths=0.2,
+            zorder=3,
         )
         mean_bias = float(np.nanmean(table[f"bias_{method}"]))
         axis.set_title(f"{labels.get(method, method)}\nmean station bias {mean_bias:+.2f} K")
@@ -682,8 +705,13 @@ def station_error_figure(table: pd.DataFrame, methods: Sequence[str], labels: di
 
 
 def improvement_figure(
-    table: pd.DataFrame, baseline: str, improved: str, orography: np.ndarray | None,
-    lat2d: np.ndarray | None, lon2d: np.ndarray | None, path,
+    table: pd.DataFrame,
+    baseline: str,
+    improved: str,
+    orography: np.ndarray | None,
+    lat2d: np.ndarray | None,
+    lon2d: np.ndarray | None,
+    path,
 ) -> dict:
     """Map where downscaling helps, in absolute and relative terms.
 
@@ -732,8 +760,10 @@ def improvement_figure(
     }
 
     extent = (
-        float(table.longitude.min()) - 0.6, float(table.longitude.max()) + 0.6,
-        float(table.latitude.min()) - 0.4, float(table.latitude.max()) + 0.4,
+        float(table.longitude.min()) - 0.6,
+        float(table.longitude.max()) + 0.6,
+        float(table.latitude.min()) - 0.4,
+        float(table.latitude.max()) + 0.4,
     )
     cmap = diverging_white_cmap()
     fig = plt.figure(figsize=(19, 6.5), constrained_layout=True)
@@ -748,8 +778,16 @@ def improvement_figure(
         add_map_background(axis, extent)
         limit = scale or float(np.nanpercentile(np.abs(values[usable]), 98))
         points = axis.scatter(
-            table.longitude, table.latitude, c=values, cmap=cmap, vmin=-limit, vmax=limit,
-            s=16, edgecolors="k", linewidths=0.2, zorder=3,
+            table.longitude,
+            table.latitude,
+            c=values,
+            cmap=cmap,
+            vmin=-limit,
+            vmax=limit,
+            s=16,
+            edgecolors="k",
+            linewidths=0.2,
+            zorder=3,
         )
         axis.set_title(f"{title}\n{100 * summary['stations_improved_fraction']:.0f}% of stations improve")
         fig.colorbar(points, ax=axis, label=label)
@@ -763,9 +801,7 @@ def improvement_figure(
         (gain, "tab:red", "absolute (K)", False),
         (relative, "tab:purple", "relative (%)", True),
     ):
-        smoothed = pd.Series(values[usable].values[order]).rolling(
-            window, center=True, min_periods=window // 2
-        ).mean()
+        smoothed = pd.Series(values[usable].values[order]).rolling(window, center=True, min_periods=window // 2).mean()
         target_axis = axis.twinx() if twin else axis
         target_axis.plot(elevation_sorted, smoothed, color=colour, lw=2, label=name)
         if twin:
@@ -830,9 +866,11 @@ class DistributionSamples:
         :returns: One row per level with the observed quantile and one column per method.
         :rtype: pandas.DataFrame
         """
-        levels = list(levels) if levels is not None else [
-            0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 0.995, 0.999
-        ]
+        levels = (
+            list(levels)
+            if levels is not None
+            else [0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 0.995, 0.999]
+        )
         observed = np.concatenate(self.observed)
         out = pd.DataFrame({"level": levels, "observed": np.quantile(observed, levels)})
         for method in self.methods:
@@ -868,8 +906,12 @@ def quantile_figure(quantiles: pd.DataFrame, methods: Sequence[str], labels: dic
         axis.plot([low, high], [low, high], "k--", lw=1)
         for method in methods:
             axis.plot(
-                observed, quantiles[f"{method} {kind}"] - 273.15, marker="o", ms=4,
-                color=colours.get(method), label=labels.get(method, method),
+                observed,
+                quantiles[f"{method} {kind}"] - 273.15,
+                marker="o",
+                ms=4,
+                color=colours.get(method),
+                label=labels.get(method, method),
             )
         for level, value in zip(quantiles.level, observed):
             if level in (0.001, 0.5, 0.999):
@@ -949,7 +991,10 @@ def station_distance_to_coast(
 
 
 def coast_profile(
-    table: pd.DataFrame, distance: np.ndarray, baseline: str, improved: str,
+    table: pd.DataFrame,
+    distance: np.ndarray,
+    baseline: str,
+    improved: str,
     edges: Sequence[float] = (0, 10, 25, 50, 100, 200, 1e6),
 ) -> pd.DataFrame:
     """Summarise the gain from downscaling by distance from the coast.
@@ -1011,8 +1056,12 @@ def coast_figure(table: pd.DataFrame, distance: np.ndarray, profile: pd.DataFram
 
     fig, ax = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
     scatter = ax[0].scatter(
-        np.maximum(distance[usable], 1), gain[usable], c=table.elevation.values[usable],
-        cmap="terrain", s=12, alpha=0.7,
+        np.maximum(distance[usable], 1),
+        gain[usable],
+        c=table.elevation.values[usable],
+        cmap="terrain",
+        s=12,
+        alpha=0.7,
     )
     ax[0].set_xscale("log")
     ax[0].axhline(0, color="k", lw=0.8)
@@ -1027,9 +1076,7 @@ def coast_figure(table: pd.DataFrame, distance: np.ndarray, profile: pd.DataFram
     ax[1].bar(positions, profile.mean_gain_K, color="tab:green", alpha=0.8)
     ax[1].axhline(0, color="k", lw=0.8)
     ax[1].set_xticks(positions)
-    ax[1].set_xticklabels(
-        [f"{band}\nn={n}" for band, n in zip(profile.band, profile.n_stations)], fontsize=7
-    )
+    ax[1].set_xticklabels([f"{band}\nn={n}" for band, n in zip(profile.band, profile.n_stations)], fontsize=7)
     ax[1].set_ylabel("mean RMSE reduction (K)")
     ax[1].set_title("gain by distance band")
     ax[1].grid(alpha=0.3, axis="y")
@@ -1039,7 +1086,9 @@ def coast_figure(table: pd.DataFrame, distance: np.ndarray, profile: pd.DataFram
 
 
 def coast_transect(
-    fields: dict[str, np.ndarray], distance_km: np.ndarray, mask: np.ndarray,
+    fields: dict[str, np.ndarray],
+    distance_km: np.ndarray,
+    mask: np.ndarray,
     edges: Sequence[float] = (0, 5, 10, 15, 20, 30, 40, 60, 80, 120, 200),
 ) -> pd.DataFrame:
     """Average each field across bands of distance from the coast, over time and day by day.
@@ -1066,8 +1115,7 @@ def coast_transect(
         chosen = mask & (distance_km >= low) & (distance_km < high)
         if not chosen.any():
             continue
-        row = {"band": f"{low:.0f}-{high:.0f} km", "distance_km": (low + high) / 2,
-               "n_points": int(chosen.sum())}
+        row = {"band": f"{low:.0f}-{high:.0f} km", "distance_km": (low + high) / 2, "n_points": int(chosen.sum())}
         for name, values in fields.items():
             per_time = values[:, chosen].mean(axis=1)
             row[f"{name}_mean"] = round(float(per_time.mean()), 3)
@@ -1109,8 +1157,13 @@ def transect_figure(transect: pd.DataFrame, labels: Sequence[str], path) -> None
 
 
 def comparison_figure(
-    coarse: np.ndarray, downscaled: np.ndarray, target: np.ndarray,
-    lat2d: np.ndarray, lon2d: np.ndarray, path, mask: np.ndarray | None = None,
+    coarse: np.ndarray,
+    downscaled: np.ndarray,
+    target: np.ndarray,
+    lat2d: np.ndarray,
+    lon2d: np.ndarray,
+    path,
+    mask: np.ndarray | None = None,
     time_label: str = "",
 ) -> dict:
     """Show the coarse, downscaled and target fields with the two error maps.
@@ -1155,8 +1208,9 @@ def comparison_figure(
     fig, ax = plt.subplots(1, 5, figsize=(24, 4.8), constrained_layout=True)
     titles = ["coarse field", "downscaled", "target"]
     for axis, field, title in zip(ax[:3], fields, titles):
-        mesh = axis.pcolormesh(lon2d, lat2d, field - 273.15, cmap="RdYlBu_r", vmin=low - 273.15,
-                               vmax=high - 273.15, shading="auto")
+        mesh = axis.pcolormesh(
+            lon2d, lat2d, field - 273.15, cmap="RdYlBu_r", vmin=low - 273.15, vmax=high - 273.15, shading="auto"
+        )
         axis.set_title(title)
         fig.colorbar(mesh, ax=axis, label="degC")
     for axis, error, name in zip(ax[3:], errors, ("coarse", "downscaled")):
@@ -1174,8 +1228,11 @@ def comparison_figure(
 
 
 def score_against_stations(
-    values: dict[str, np.ndarray], observed: np.ndarray, elevation: np.ndarray,
-    hours: np.ndarray, edges: Sequence[float],
+    values: dict[str, np.ndarray],
+    observed: np.ndarray,
+    elevation: np.ndarray,
+    hours: np.ndarray,
+    edges: Sequence[float],
 ) -> pd.DataFrame:
     """Score several fields against station observations, overall and by band.
 
@@ -1199,11 +1256,16 @@ def score_against_stations(
         difference = difference[np.isfinite(difference)]
         if difference.size == 0:
             return
-        rows.append({
-            "field": name, "grouping": grouping, "band": band, "n": int(difference.size),
-            "bias_K": round(float(difference.mean()), 3),
-            "rmse_K": round(float(np.sqrt((difference ** 2).mean())), 3),
-        })
+        rows.append(
+            {
+                "field": name,
+                "grouping": grouping,
+                "band": band,
+                "n": int(difference.size),
+                "bias_K": round(float(difference.mean()), 3),
+                "rmse_K": round(float(np.sqrt((difference**2).mean())), 3),
+            }
+        )
 
     everything = np.ones_like(observed, bool)
     for name in values:
@@ -1216,8 +1278,9 @@ def score_against_stations(
     return pd.DataFrame(rows)
 
 
-def floor_figure(scores: pd.DataFrame, path, fields: Sequence[str] = ("coarse", "downscaled", "target"),
-                 labels: dict | None = None) -> None:
+def floor_figure(
+    scores: pd.DataFrame, path, fields: Sequence[str] = ("coarse", "downscaled", "target"), labels: dict | None = None
+) -> None:
     """Plot each field's error against stations, with the target shaded as the floor.
 
     :param scores: Output of :func:`score_against_stations`.
@@ -1237,7 +1300,8 @@ def floor_figure(scores: pd.DataFrame, path, fields: Sequence[str] = ("coarse", 
     import matplotlib.pyplot as plt
 
     labels = labels or {
-        "coarse": "coarse field", "downscaled": "coarse field + downscaler",
+        "coarse": "coarse field",
+        "downscaled": "coarse field + downscaler",
         "target": "target reanalysis (the floor)",
     }
     colours = {"coarse": "tab:blue", "downscaled": "tab:red", "target": "tab:green"}
@@ -1251,11 +1315,11 @@ def floor_figure(scores: pd.DataFrame, path, fields: Sequence[str] = ("coarse", 
         positions = np.arange(len(bands))
         for name in fields:
             chosen = subset[subset.field == name].set_index("band").reindex(bands)
-            axis.plot(positions, chosen.rmse_K.values, marker="o",
-                      color=colours.get(name), label=labels.get(name, name))
+            axis.plot(
+                positions, chosen.rmse_K.values, marker="o", color=colours.get(name), label=labels.get(name, name)
+            )
             if name == fields[-1]:
-                axis.fill_between(positions, 0, chosen.rmse_K.values,
-                                  color=colours.get(name, "tab:green"), alpha=0.12)
+                axis.fill_between(positions, 0, chosen.rmse_K.values, color=colours.get(name, "tab:green"), alpha=0.12)
         axis.set_xticks(positions)
         axis.set_xticklabels(bands, fontsize=7, rotation=20)
         axis.set_title(title)
@@ -1268,8 +1332,13 @@ def floor_figure(scores: pd.DataFrame, path, fields: Sequence[str] = ("coarse", 
 
 
 def validation_figure(
-    fields: dict[str, np.ndarray], observed: np.ndarray, elevation: np.ndarray,
-    hours: np.ndarray, path, edges: Sequence[float] | None = None, labels: dict | None = None,
+    fields: dict[str, np.ndarray],
+    observed: np.ndarray,
+    elevation: np.ndarray,
+    hours: np.ndarray,
+    path,
+    edges: Sequence[float] | None = None,
+    labels: dict | None = None,
 ) -> pd.DataFrame:
     """Four views of how each field performs against station observations.
 
@@ -1314,11 +1383,11 @@ def validation_figure(
     positions = np.arange(len(bands))
     for name in names:
         chosen = by_elevation[by_elevation.field == name].set_index("band").reindex(bands)
-        ax[0, 0].plot(positions, chosen.rmse_K.values, marker="o",
-                      color=colours.get(name), label=labels.get(name, name))
+        ax[0, 0].plot(
+            positions, chosen.rmse_K.values, marker="o", color=colours.get(name), label=labels.get(name, name)
+        )
         if name == names[-1] and len(names) > 2:
-            ax[0, 0].fill_between(positions, 0, chosen.rmse_K.values,
-                                  color=colours.get(name, "tab:green"), alpha=0.12)
+            ax[0, 0].fill_between(positions, 0, chosen.rmse_K.values, color=colours.get(name, "tab:green"), alpha=0.12)
     ax[0, 0].set_xticks(positions)
     ax[0, 0].set_xticklabels(bands, fontsize=7, rotation=20)
     ax[0, 0].set_ylabel("RMSE (K)")
@@ -1332,8 +1401,9 @@ def validation_figure(
     positions = np.arange(len(hour_bands))
     for name in names:
         chosen = by_hour[by_hour.field == name].set_index("band").reindex(hour_bands)
-        ax[0, 1].plot(positions, chosen.rmse_K.values, marker="o", color=colours.get(name),
-                      label=labels.get(name, name))
+        ax[0, 1].plot(
+            positions, chosen.rmse_K.values, marker="o", color=colours.get(name), label=labels.get(name, name)
+        )
         ax[0, 1].plot(positions, chosen.bias_K.values, marker="s", ls="--", color=colours.get(name))
     ax[0, 1].axhline(0, color="k", lw=0.8)
     ax[0, 1].set_xticks(positions)
@@ -1345,8 +1415,16 @@ def validation_figure(
     valid = np.isfinite(observed)
     for name in names:
         difference = (fields[name] - observed)[valid & np.isfinite(fields[name])]
-        ax[1, 0].hist(difference, bins=80, range=(-8, 8), histtype="step", linewidth=1.6,
-                      density=True, color=colours.get(name), label=labels.get(name, name))
+        ax[1, 0].hist(
+            difference,
+            bins=80,
+            range=(-8, 8),
+            histtype="step",
+            linewidth=1.6,
+            density=True,
+            color=colours.get(name),
+            label=labels.get(name, name),
+        )
     ax[1, 0].axvline(0, color="k", lw=0.8)
     ax[1, 0].set_xlabel("forecast minus observation (K)")
     ax[1, 0].set_ylabel("density")
@@ -1360,8 +1438,14 @@ def validation_figure(
     ax[1, 1].plot([low, high], [low, high], "k--", lw=1)
     for name in names:
         usable = valid & np.isfinite(fields[name])
-        ax[1, 1].plot(observed_quantiles, np.quantile(fields[name][usable], levels) - 273.15,
-                      marker="o", ms=4, color=colours.get(name), label=labels.get(name, name))
+        ax[1, 1].plot(
+            observed_quantiles,
+            np.quantile(fields[name][usable], levels) - 273.15,
+            marker="o",
+            ms=4,
+            color=colours.get(name),
+            label=labels.get(name, name),
+        )
     ax[1, 1].set_xlabel("observed quantile (degC)")
     ax[1, 1].set_ylabel("forecast quantile (degC)")
     ax[1, 1].set_title("does it reach the observed extremes?")

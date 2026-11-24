@@ -8,7 +8,7 @@ combined exactly before taking square roots.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
@@ -42,7 +42,10 @@ def fair_crps(ensemble: np.ndarray, truth: np.ndarray, axis: int = 0) -> np.ndar
 
 
 def lead_scores(
-    forecast: xr.DataArray, truth: xr.DataArray, member_dim: str = "member", lead_dim: str = "lead_time",
+    forecast: xr.DataArray,
+    truth: xr.DataArray,
+    member_dim: str = "member",
+    lead_dim: str = "lead_time",
 ) -> pd.DataFrame:
     """Ensemble scores per lead time, pooled over every other dimension.
 
@@ -67,7 +70,9 @@ def lead_scores(
         forecast = forecast.expand_dims({member_dim: 1})
     truth = truth.broadcast_like(forecast.isel({member_dim: 0}, drop=True))
     others = [d for d in truth.dims if d != lead_dim]
-    ens = forecast.transpose(member_dim, lead_dim, *others).values.reshape(forecast.sizes[member_dim], forecast.sizes[lead_dim], -1)
+    ens = forecast.transpose(member_dim, lead_dim, *others).values.reshape(
+        forecast.sizes[member_dim], forecast.sizes[lead_dim], -1
+    )
     ref = truth.transpose(lead_dim, *others).values.reshape(truth.sizes[lead_dim], -1)
     valid = np.isfinite(ref) & np.isfinite(ens).all(0)
     error = np.where(valid, ens.mean(0) - ref, 0.0)
@@ -78,17 +83,19 @@ def lead_scores(
         variance = np.where(valid, ens.var(0, ddof=1), 0.0)
     n = valid.sum(1)
     with np.errstate(invalid="ignore", divide="ignore"):
-        rmse = np.sqrt((error ** 2).sum(1) / n)
+        rmse = np.sqrt((error**2).sum(1) / n)
         spread = np.sqrt(variance.sum(1) / n)
-        table = pd.DataFrame({
-            "lead_hours": (truth[lead_dim].values / np.timedelta64(1, "h")).astype(int),
-            "n": n,
-            "rmse_K": rmse,
-            "bias_K": error.sum(1) / n,
-            "crps_K": crps.sum(1) / n,
-            "spread_K": spread,
-            "spread_skill": spread / rmse,
-        })
+        table = pd.DataFrame(
+            {
+                "lead_hours": (truth[lead_dim].values / np.timedelta64(1, "h")).astype(int),
+                "n": n,
+                "rmse_K": rmse,
+                "bias_K": error.sum(1) / n,
+                "crps_K": crps.sum(1) / n,
+                "spread_K": spread,
+                "spread_skill": spread / rmse,
+            }
+        )
     return table[table.n > 0].reset_index(drop=True)
 
 
@@ -101,12 +108,14 @@ def pooled(table: pd.DataFrame) -> pd.Series:
     :rtype: pandas.Series
     """
     n = table.n.sum()
-    return pd.Series({
-        "rmse_K": float(np.sqrt((table.n * table.rmse_K ** 2).sum() / n)),
-        "bias_K": float((table.n * table.bias_K).sum() / n),
-        "crps_K": float((table.n * table.crps_K).sum() / n),
-        "spread_K": float(np.sqrt((table.n * table.spread_K ** 2).sum() / n)),
-    })
+    return pd.Series(
+        {
+            "rmse_K": float(np.sqrt((table.n * table.rmse_K**2).sum() / n)),
+            "bias_K": float((table.n * table.bias_K).sum() / n),
+            "crps_K": float((table.n * table.crps_K).sum() / n),
+            "spread_K": float(np.sqrt((table.n * table.spread_K**2).sum() / n)),
+        }
+    )
 
 
 def combine_leads(tables: Sequence[pd.DataFrame]) -> pd.DataFrame:
@@ -118,13 +127,20 @@ def combine_leads(tables: Sequence[pd.DataFrame]) -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     rows = pd.concat(tables)
-    rows = rows.assign(se=rows.n * rows.rmse_K ** 2, e=rows.n * rows.bias_K, c=rows.n * rows.crps_K,
-                       v=rows.n * rows.spread_K ** 2)
+    rows = rows.assign(
+        se=rows.n * rows.rmse_K**2, e=rows.n * rows.bias_K, c=rows.n * rows.crps_K, v=rows.n * rows.spread_K**2
+    )
     sums = rows.groupby("lead_hours")[["n", "se", "e", "c", "v"]].sum().reset_index()
-    out = pd.DataFrame({
-        "lead_hours": sums.lead_hours, "n": sums.n, "rmse_K": np.sqrt(sums.se / sums.n),
-        "bias_K": sums.e / sums.n, "crps_K": sums.c / sums.n, "spread_K": np.sqrt(sums.v / sums.n),
-    })
+    out = pd.DataFrame(
+        {
+            "lead_hours": sums.lead_hours,
+            "n": sums.n,
+            "rmse_K": np.sqrt(sums.se / sums.n),
+            "bias_K": sums.e / sums.n,
+            "crps_K": sums.c / sums.n,
+            "spread_K": np.sqrt(sums.v / sums.n),
+        }
+    )
     out["spread_skill"] = out.spread_K / out.rmse_K
     return out
 
@@ -156,7 +172,8 @@ def at_valid_times(reference: xr.DataArray, valid_time: xr.DataArray) -> xr.Data
     others = [d for d in picked.dims if d != "time"]
     values = picked.transpose("time", *others).values.reshape(*valid_time.shape, *[picked.sizes[d] for d in others])
     return xr.DataArray(
-        values, dims=["time", "lead_time", *others],
+        values,
+        dims=["time", "lead_time", *others],
         coords={"time": valid_time.time.values, "lead_time": valid_time.lead_time.values},
     )
 
@@ -174,11 +191,14 @@ def station_rmse(field: np.ndarray, observed: np.ndarray) -> np.ndarray:
     difference = (np.asarray(field) - np.asarray(observed)).reshape(-1, np.shape(observed)[-1])
     ok = np.isfinite(difference)
     with np.errstate(invalid="ignore", divide="ignore"):
-        return np.sqrt(np.where(ok, difference ** 2, 0.0).sum(0) / ok.sum(0))
+        return np.sqrt(np.where(ok, difference**2, 0.0).sum(0) / ok.sum(0))
 
 
 def elevation_scores(
-    fields: dict[str, np.ndarray], observed: np.ndarray, elevation: np.ndarray, edges: Sequence[float],
+    fields: dict[str, np.ndarray],
+    observed: np.ndarray,
+    elevation: np.ndarray,
+    edges: Sequence[float],
 ) -> pd.DataFrame:
     """RMSE of several deterministic fields against stations, per elevation band.
 
@@ -202,6 +222,12 @@ def elevation_scores(
             difference = (values - observed)[..., chosen]
             difference = difference[np.isfinite(difference)]
             if difference.size:
-                rows.append({"field": name, "band": band, "n": int(difference.size),
-                             "rmse_K": float(np.sqrt((difference ** 2).mean()))})
+                rows.append(
+                    {
+                        "field": name,
+                        "band": band,
+                        "n": int(difference.size),
+                        "rmse_K": float(np.sqrt((difference**2).mean())),
+                    }
+                )
     return pd.DataFrame(rows)

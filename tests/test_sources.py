@@ -30,19 +30,30 @@ def earthmover_archive(inits, ingested=None, members=5, leads=7):
     lead = pd.to_timedelta(6 * np.arange(leads), "h")
     shape = (len(inits), leads, members, lat.size, lon.size)
     values = (
-        15 + 0.1 * np.arange(members)[None, None, :, None, None]
-        + 0.01 * lon[None, None, None, None, :] + np.zeros(shape)
+        15
+        + 0.1 * np.arange(members)[None, None, :, None, None]
+        + 0.01 * lon[None, None, None, None, :]
+        + np.zeros(shape)
     ).astype("f4")
     ingested = (
-        np.full(len(inits), np.timedelta64("NaT"), "timedelta64[ns]") if ingested is None
+        np.full(len(inits), np.timedelta64("NaT"), "timedelta64[ns]")
+        if ingested is None
         else np.asarray(ingested, "timedelta64[ns]")
     )
     ds = xr.Dataset(
-        {"temperature_2m": (("init_time", "lead_time", "ensemble_member", "latitude", "longitude"), values,
-                            {"units": "degree_Celsius"})},
+        {
+            "temperature_2m": (
+                ("init_time", "lead_time", "ensemble_member", "latitude", "longitude"),
+                values,
+                {"units": "degree_Celsius"},
+            )
+        },
         coords={
-            "init_time": inits, "lead_time": lead, "ensemble_member": np.arange(members, dtype="i2"),
-            "latitude": lat, "longitude": lon,
+            "init_time": inits,
+            "lead_time": lead,
+            "ensemble_member": np.arange(members, dtype="i2"),
+            "latitude": lat,
+            "longitude": lon,
             "ingested_forecast_length": ("init_time", ingested),
             "expected_forecast_length": ("init_time", np.full(len(inits), lead[-1].to_numpy())),
             "valid_time": (("init_time", "lead_time"), inits.values[:, None] + lead.values[None, :]),
@@ -100,10 +111,18 @@ def test_era5_is_put_on_descending_latitudes_and_positive_longitudes():
     lat, lon = np.arange(40.0, 45.0, 0.25), np.arange(-5.0, 5.0, 0.25)
     times = pd.date_range("2020-08-01", periods=3, freq="6h")
     ds = xr.Dataset(
-        {"2m_temperature": (("time", "latitude", "longitude"),
-                            290 + np.zeros((3, lat.size, lon.size)) + lon[None, None, :])},
-        coords={"time": times, "latitude": lat, "longitude": lon,
-                "z_sfc": (("latitude", "longitude"), np.ones((lat.size, lon.size)))},
+        {
+            "2m_temperature": (
+                ("time", "latitude", "longitude"),
+                290 + np.zeros((3, lat.size, lon.size)) + lon[None, None, :],
+            )
+        },
+        coords={
+            "time": times,
+            "latitude": lat,
+            "longitude": lon,
+            "z_sfc": (("latitude", "longitude"), np.ones((lat.size, lon.size))),
+        },
     )
     era5 = ERA5(dataset=ds)
     out = era5(list(times[:2]), ["t2m"])
@@ -119,13 +138,20 @@ def test_era5_crops_to_a_box_across_the_meridian_before_reading():
     lat, lon = np.arange(50.0, 39.75, -0.25), np.arange(0.0, 360.0, 0.25)
     times = pd.date_range("2020-08-01", periods=2, freq="6h")
     ds = xr.Dataset(
-        {"t2m": (("valid_time", "latitude", "longitude"), 290 + np.zeros((2, lat.size, lon.size)) + lon[None, None, :])},
+        {
+            "t2m": (
+                ("valid_time", "latitude", "longitude"),
+                290 + np.zeros((2, lat.size, lon.size)) + lon[None, None, :],
+            )
+        },
         coords={"valid_time": times, "latitude": lat, "longitude": lon},
     )
     era5 = ERA5(dataset=ds, box=(42.0, 44.0, -2.0, 2.0))
     out = era5(list(times), ["t2m"])
     assert out.sizes["lat"] == 9 and out.sizes["lon"] == 17
-    assert set(np.round(out.lon.values, 2)) == set(np.round(np.r_[np.arange(358.0, 360.0, 0.25), np.arange(0.0, 2.25, 0.25)], 2))
+    assert set(np.round(out.lon.values, 2)) == set(
+        np.round(np.r_[np.arange(358.0, 360.0, 0.25), np.arange(0.0, 2.25, 0.25)], 2)
+    )
     assert float(out.sel(lon=359.0, variable="t2m").isel(time=0, lat=0)) == pytest.approx(290 + 359.0)
 
 
@@ -145,10 +171,19 @@ def test_an_end_date_includes_its_day_but_an_end_time_does_not():
 def test_a_folder_of_stores_written_per_initialisation_opens_as_one_archive(archive, tmp_path):
     folder = tmp_path / "aifs-ens-2020"
     for i in range(archive.sizes["init_time"]):
-        one = archive.isel(init_time=[i]).rename(
-            {"init_time": "time", "ensemble_member": "ensemble", "latitude": "lat", "longitude": "lon",
-             "temperature_2m": "t2m"}
-        ).drop_vars(["ingested_forecast_length", "expected_forecast_length"])
+        one = (
+            archive.isel(init_time=[i])
+            .rename(
+                {
+                    "init_time": "time",
+                    "ensemble_member": "ensemble",
+                    "latitude": "lat",
+                    "longitude": "lon",
+                    "temperature_2m": "t2m",
+                }
+            )
+            .drop_vars(["ingested_forecast_length", "expected_forecast_length"])
+        )
         one["t2m"] = one["t2m"] + 273.15
         one["t2m"].attrs = {"units": "K"}
         one.to_zarr(folder / f"aifs-ens_{i}.zarr")
@@ -158,7 +193,8 @@ def test_a_folder_of_stores_written_per_initialisation_opens_as_one_archive(arch
     da = fetch_forecast(ds, archive.init_time.values[2], (41.0, 51.5, -5.5, 10.0))
     reference = fetch_forecast(
         archive.rename({"init_time": "time", "ensemble_member": "ensemble", "latitude": "lat", "longitude": "lon"}),
-        archive.init_time.values[2], (41.0, 51.5, -5.5, 10.0),
+        archive.init_time.values[2],
+        (41.0, 51.5, -5.5, 10.0),
     )
     np.testing.assert_allclose(da.values, reference.values, rtol=1e-6)
 

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 
 from .constants import ENSEMBLE_DIM, ENSEMBLE_METRICS, SCORING_REGIONS, elevation_edges
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +36,7 @@ def build_metrics(ensemble: bool) -> dict:
     return metrics
 
 
-def default_bins(
-    regions: Mapping | None = None, edges: Sequence[float] | None = None
-) -> list:
+def default_bins(regions: Mapping | None = None, edges: Sequence[float] | None = None) -> list:
     """Build the binning used to stratify scores.
 
     :param regions: Named sub-regions; ``None`` uses
@@ -148,18 +147,14 @@ def score_station_case(
     bins = default_bins() if isinstance(bin_by, str) else bin_by
     methods = list(methods or [m for m in ("nearest", "bilinear", "bilinear_lapse") if m in forecast_at_stations])
     obs = _scoring_inputs(obs, forecast_at_stations)
-    weights = (
-        [weighting.StationDensityWeighting(alpha_0_degrees=density_alpha_deg)] if density_alpha_deg else None
-    )
+    weights = [weighting.StationDensityWeighting(alpha_0_degrees=density_alpha_deg)] if density_alpha_deg else None
     aggregator = aggregation.Aggregator(
         reduce_dims=["init_time", "station"], bin_by=bins, weigh_by=weights, skipna=True
     )
 
     jobs = {m: forecast_at_stations[m] for m in methods}
     if analysis is not None:
-        jobs.update({
-            f"analysis_{m}": analysis[m] for m in ("nearest", "bilinear", "bilinear_lapse") if m in analysis
-        })
+        jobs.update({f"analysis_{m}": analysis[m] for m in ("nearest", "bilinear", "bilinear_lapse") if m in analysis})
 
     states, ensemble_flag, n_obs = {}, {}, {}
     for name, da in jobs.items():
@@ -172,16 +167,18 @@ def score_station_case(
         is_ensemble = ENSEMBLE_DIM in da.dims
         metrics = build_metrics(is_ensemble)
         deterministic = {k: v for k, v in metrics.items() if k not in ENSEMBLE_METRICS}
-        stats = dict(metrics_base.compute_unique_statistics_for_all_metrics(
-            deterministic,
-            {variable: da.mean(ENSEMBLE_DIM) if is_ensemble else da},
-            {variable: obs},
-        ))
+        stats = dict(
+            metrics_base.compute_unique_statistics_for_all_metrics(
+                deterministic,
+                {variable: da.mean(ENSEMBLE_DIM) if is_ensemble else da},
+                {variable: obs},
+            )
+        )
         if is_ensemble:
             probabilistic = {k: v for k, v in metrics.items() if k in ENSEMBLE_METRICS}
-            stats.update(metrics_base.compute_unique_statistics_for_all_metrics(
-                probabilistic, {variable: da}, {variable: obs}
-            ))
+            stats.update(
+                metrics_base.compute_unique_statistics_for_all_metrics(probabilistic, {variable: da}, {variable: obs})
+            )
         states[name] = aggregator.aggregate_statistics(stats)
         ensemble_flag[name] = is_ensemble
         n_obs[name] = int(np.isfinite(obs.values).sum())
@@ -290,7 +287,5 @@ def to_frame(results: Mapping[str, xr.Dataset], metric: str = "rmse", **selectio
         da = da.squeeze(drop=True)
         if da.ndim != 1:
             raise ValueError(f"{name}: {metric} still has dimensions {da.dims}; select more bins")
-        columns[name] = pd.Series(
-            da.values, index=(da["lead_time"].values / np.timedelta64(1, "h")).astype(int)
-        )
+        columns[name] = pd.Series(da.values, index=(da["lead_time"].values / np.timedelta64(1, "h")).astype(int))
     return pd.DataFrame(columns).rename_axis("lead_h")

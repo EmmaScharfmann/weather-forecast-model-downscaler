@@ -161,9 +161,7 @@ def test_comparison_detects_too_little_and_too_much_small_scale_power():
     target = np.stack([smooth_field(96, 96, 2, rng) for _ in range(6)])
     smoother = np.stack([smooth_field(96, 96, 6, rng) for _ in range(6)])
     noisy = target + rng.normal(0, target.std(), target.shape)
-    comparison = spectrum_comparison(
-        {"target": target, "smoother": smoother, "noisy": noisy}, spacing_km=5.0
-    )
+    comparison = spectrum_comparison({"target": target, "smoother": smoother, "noisy": noisy}, spacing_km=5.0)
     short = comparison[comparison.wavelength_km < 25]
     assert short.smoother_over_target.mean() < 0.5
     assert short.noisy_over_target.mean() > 2
@@ -198,11 +196,14 @@ def station_case(n_stations=60, n_init=3, n_lead=4, n_members=5, seed=0, mountai
     }
     truth = 300 + rng.normal(0, 3, (n_init, n_lead, n_stations))
     coarse_error = 0.002 * elevation if mountain_gain else np.zeros(n_stations)
-    build = lambda offset: xr.DataArray(
-        truth[:, :, None, :] + rng.normal(0, 1, (n_init, n_lead, n_members, n_stations)) + offset,
-        dims=("init_time", "lead_time", "ensemble", "station"),
-        coords={**coords, "ensemble": np.arange(n_members)},
-    )
+
+    def build(offset):
+        return xr.DataArray(
+            truth[:, :, None, :] + rng.normal(0, 1, (n_init, n_lead, n_members, n_stations)) + offset,
+            dims=("init_time", "lead_time", "ensemble", "station"),
+            coords={**coords, "ensemble": np.arange(n_members)},
+        )
+
     forecast = xr.Dataset({"coarse": build(coarse_error[None, None, None, :]), "downscaled": build(0.0)})
     obs = xr.DataArray(truth, dims=("init_time", "lead_time", "station"), coords=coords)
     return forecast, obs
@@ -242,9 +243,7 @@ def test_improvement_is_flat_when_the_methods_are_equivalent(tmp_path):
     forecast, obs = station_case(mountain_gain=False)
     accumulator = StationErrors(["coarse", "downscaled"])
     accumulator.add(forecast, obs)
-    summary = improvement_figure(
-        accumulator.table(), "coarse", "downscaled", None, None, None, tmp_path / "flat.png"
-    )
+    summary = improvement_figure(accumulator.table(), "coarse", "downscaled", None, None, None, tmp_path / "flat.png")
     assert abs(summary["correlation_gain_elevation"]) < 0.4
 
 
@@ -252,16 +251,14 @@ def test_quantiles_show_a_damped_distribution(tmp_path):
     from downscale.diagnostics import DistributionSamples, quantile_figure
 
     forecast, obs = station_case(n_stations=200, mountain_gain=False)
-    mean = forecast["coarse"].mean("station")
+    forecast["coarse"].mean("station")
     forecast["coarse"] = (forecast["coarse"] - forecast["coarse"].mean()) * 0.5 + forecast["coarse"].mean()
     samples = DistributionSamples(["coarse", "downscaled"])
     samples.add(forecast, obs)
     quantiles = samples.quantiles()
     top = quantiles.level == 0.99
     assert float(quantiles.loc[top, "coarse member"].iloc[0]) < float(quantiles.loc[top, "observed"].iloc[0])
-    assert float(quantiles.loc[top, "downscaled member"].iloc[0]) > float(
-        quantiles.loc[top, "coarse member"].iloc[0]
-    )
+    assert float(quantiles.loc[top, "downscaled member"].iloc[0]) > float(quantiles.loc[top, "coarse member"].iloc[0])
     quantile_figure(quantiles, ["coarse", "downscaled"], {}, tmp_path / "q.png")
     assert (tmp_path / "q.png").stat().st_size > 10_000
 
@@ -293,14 +290,16 @@ def test_coast_profile_separates_coastal_from_inland_gains(tmp_path):
     rng = np.random.default_rng(0)
     n = 300
     distance = rng.uniform(0, 300, n)
-    table = pd.DataFrame({
-        "station": [f"s{i}" for i in range(n)],
-        "latitude": rng.uniform(42, 51, n),
-        "longitude": rng.uniform(-4, 8, n),
-        "elevation": rng.uniform(0, 2000, n),
-        "rmse_coarse": 3.0,
-        "rmse_downscaled": np.where(distance < 25, 3.0, 2.0),
-    })
+    table = pd.DataFrame(
+        {
+            "station": [f"s{i}" for i in range(n)],
+            "latitude": rng.uniform(42, 51, n),
+            "longitude": rng.uniform(-4, 8, n),
+            "elevation": rng.uniform(0, 2000, n),
+            "rmse_coarse": 3.0,
+            "rmse_downscaled": np.where(distance < 25, 3.0, 2.0),
+        }
+    )
     profile = coast_profile(table, distance, "coarse", "downscaled")
     assert profile.loc[profile.band == "0-10 km", "mean_gain_K"].iloc[0] == pytest.approx(0.0)
     assert profile.loc[profile.band == "100-200 km", "mean_gain_K"].iloc[0] == pytest.approx(1.0)

@@ -11,6 +11,7 @@ Hours are right-labelled UTC, like the rainfall packs: the value at ``t``
 is the depth over ``(t-1h, t]``. ``gauge_lag_check`` verifies the gauge
 convention against the radar instead of assuming it.
 """
+
 from __future__ import annotations
 
 import io
@@ -25,13 +26,16 @@ import numpy as np
 import pandas as pd
 import requests
 
+
 DATA_GOUV = "https://www.data.gouv.fr/api/1/datasets/donnees-climatologiques-de-base-horaires/"
 KNMI_API = "https://api.dataplatform.knmi.nl/open-data/v1/datasets"
 EURADCLIM = ("RAD_OPERA_HOURLY_RAINFALL_ACCUMULATION_EURADCLIM", "3.0")
 # KNMI publishes this shared anonymous key; it is heavily rate limited, so set
 # KNMI_API_KEY to a free personal key from developer.dataplatform.knmi.nl.
-KNMI_ANONYMOUS_KEY = ("eyJvcmciOiI1ZTU1NGUxOTI3NGE5NjAwMDEyYTNlYjEiLCJpZCI6IjUzYTg1ZDBhMmQ5YzRkYzJiYWNlNzQ4"
-                      "NTQ2Zjk4ODExIiwiaCI6Im11cm11cjEyOCJ9")
+KNMI_ANONYMOUS_KEY = (
+    "eyJvcmciOiI1ZTU1NGUxOTI3NGE5NjAwMDEyYTNlYjEiLCJpZCI6IjUzYTg1ZDBhMmQ5YzRkYzJiYWNlNzQ4"
+    "NTQ2Zjk4ODExIiwiaCI6Im11cm11cjEyOCJ9"
+)
 # Quality codes of RR1: 0 protected, 1 validated, 9 filtered, 2 doubtful.
 GOOD_QUALITY = {0, 1, 9}
 
@@ -58,6 +62,7 @@ def _download(url, path, headers=None, attempts=6):
 
 # --------------------------------------------------------------------------- gauges
 
+
 def gauge_catalogue(cache):
     """Department files of the hourly dataset: department, first and last year, URL."""
     path = Path(cache) / "gauge_catalogue.json"
@@ -68,7 +73,9 @@ def gauge_catalogue(cache):
         for item in resources:
             match = re.match(r"HOR_departement_(\w+?)_periode_(\d{4})-(\d{4})$", item["title"])
             if match:
-                rows.append({"department": match[1], "first": int(match[2]), "last": int(match[3]), "url": item["url"]})
+                rows.append(
+                    {"department": match[1], "first": int(match[2]), "last": int(match[3]), "url": item["url"]}
+                )
         path.write_text(json.dumps(rows))
     return pd.DataFrame(json.loads(path.read_text()))
 
@@ -83,17 +90,24 @@ def read_gauge_file(source, times):
     wanted = set(pd.DatetimeIndex(times).strftime("%Y%m%d%H").astype(int))
     columns = ["NUM_POSTE", "NOM_USUEL", "LAT", "LON", "ALTI", "AAAAMMJJHH", "RR1", "QRR1"]
     parts = []
-    for chunk in pd.read_csv(source, sep=";", usecols=columns, chunksize=500_000,
-                             dtype={"NUM_POSTE": str, "NOM_USUEL": str}):
+    for chunk in pd.read_csv(
+        source, sep=";", usecols=columns, chunksize=500_000, dtype={"NUM_POSTE": str, "NOM_USUEL": str}
+    ):
         chunk = chunk[chunk.AAAAMMJJHH.isin(wanted) & chunk.RR1.notna()]
         chunk = chunk[chunk.QRR1.fillna(9).astype(int).isin(GOOD_QUALITY)]
         parts.append(chunk)
     frame = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=columns)
-    return pd.DataFrame({
-        "station_id": frame.NUM_POSTE.str.zfill(8), "name": frame.NOM_USUEL,
-        "lat": frame.LAT.astype(float), "lon": frame.LON.astype(float), "elevation_m": frame.ALTI.astype(float),
-        "time": pd.to_datetime(frame.AAAAMMJJHH.astype(str), format="%Y%m%d%H"),
-        "rain_mm": frame.RR1.astype("float32")})
+    return pd.DataFrame(
+        {
+            "station_id": frame.NUM_POSTE.str.zfill(8),
+            "name": frame.NOM_USUEL,
+            "lat": frame.LAT.astype(float),
+            "lon": frame.LON.astype(float),
+            "elevation_m": frame.ALTI.astype(float),
+            "time": pd.to_datetime(frame.AAAAMMJJHH.astype(str), format="%Y%m%d%H"),
+            "rain_mm": frame.RR1.astype("float32"),
+        }
+    )
 
 
 def load_gauges(times, cache, bbox=None, departments=None):
@@ -149,11 +163,16 @@ def wet_days(start, end, cache, threshold=1.0, departments=None):
             for url in rows[(rows["first"] <= end.year) & (rows["last"] >= start.year)].url:
                 raw = _download(url, Path(cache) / "gauges" / "raw" / Path(url).name)
                 for chunk in pd.read_csv(raw, sep=";", usecols=["AAAAMMJJHH", "RR1", "QRR1"], chunksize=500_000):
-                    chunk = chunk[chunk.AAAAMMJJHH.between(lo, hi) & chunk.RR1.notna()
-                                  & chunk.QRR1.fillna(9).astype(int).isin(GOOD_QUALITY)]
+                    chunk = chunk[
+                        chunk.AAAAMMJJHH.between(lo, hi)
+                        & chunk.RR1.notna()
+                        & chunk.QRR1.fillna(9).astype(int).isin(GOOD_QUALITY)
+                    ]
                     # Right-labelled hours: 00 UTC closes the previous day.
                     stamp = pd.to_datetime(chunk.AAAAMMJJHH.astype(str), format="%Y%m%d%H") - pd.Timedelta(hours=1)
-                    parts.append(pd.DataFrame({"day": stamp.dt.floor("D"), "wet": chunk.RR1 >= threshold, "rain": chunk.RR1}))
+                    parts.append(
+                        pd.DataFrame({"day": stamp.dt.floor("D"), "wet": chunk.RR1 >= threshold, "rain": chunk.RR1})
+                    )
                 raw.unlink()
             frame = pd.concat(parts) if parts else pd.DataFrame(columns=["day", "wet", "rain"])
             daily = frame.groupby("day").agg(hours=("wet", "size"), wet=("wet", "sum"), rain=("rain", "sum"))
@@ -161,7 +180,7 @@ def wet_days(start, end, cache, threshold=1.0, departments=None):
             daily.to_csv(out)
         totals.append(pd.read_csv(out, parse_dates=["day"]))
     daily = pd.concat(totals).groupby("day")[["hours", "wet", "rain"]].sum()
-    daily = daily.loc[start.floor("D"):end.floor("D")]  # edge hours of partial days
+    daily = daily.loc[start.floor("D") : end.floor("D")]  # edge hours of partial days
     daily["wet_fraction"] = daily.wet / daily.hours
     daily["mean_rain_mm"] = daily.rain / daily.hours * 24
     return daily
@@ -208,6 +227,7 @@ def at_stations(fields, stations):
 
 
 # --------------------------------------------------------------------------- EURADCLIM
+
 
 def _knmi_headers():
     return {"Authorization": os.environ.get("KNMI_API_KEY", KNMI_ANONYMOUS_KEY)}
@@ -263,6 +283,7 @@ def read_odim(source):
     """Values (mm, NaN for no data) and pixel-centre lat/lon of an ODIM HDF5 composite."""
     import h5py
     from pyproj import CRS, Transformer
+
     with h5py.File(source, "r") as h5:
         data = h5["dataset1/data1/data"][()].astype("float64")
         what = {}
@@ -278,7 +299,10 @@ def read_odim(source):
     values = data * gain + offset
     values[dry] = 0.0
     values[missing] = np.nan
-    text = lambda v: v.decode() if isinstance(v, bytes) else str(v)
+
+    def text(v):
+        return v.decode() if isinstance(v, bytes) else str(v)
+
     crs = CRS.from_proj4(text(where["projdef"]))
     forward = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
     back = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
@@ -343,8 +367,11 @@ def load_euradclim(times, lat, lon, cache, min_coverage=0.9):
     if missing.any():
         # Real gaps exist (e.g. 7 empty hours on 2023-10-30): score those hours
         # against gauges and PARDIG only, rather than stopping the evaluation.
-        print(f"EURADCLIM has no field for {missing.sum()} hours, e.g. {list(times[missing][:3])}; "
-              "they are left out of the radar scores", flush=True)
+        print(
+            f"EURADCLIM has no field for {missing.sum()} hours, e.g. {list(times[missing][:3])}; "
+            "they are left out of the radar scores",
+            flush=True,
+        )
     out.parent.mkdir(parents=True, exist_ok=True)
     np.save(out, result)
     return result

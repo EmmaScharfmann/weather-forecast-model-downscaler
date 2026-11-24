@@ -23,6 +23,7 @@ import xarray as xr
 
 from .regions import Region, crop_indices, to_signed_lon
 
+
 logger = logging.getLogger(__name__)
 
 OPEN_DATA_URL = "https://storage.googleapis.com/ecmwf-open-data"
@@ -58,7 +59,7 @@ def _get(url: str, byte_range: tuple[int, int] | None = None, retries: int = 6) 
                 raise
             if attempt == retries:
                 raise
-            time.sleep(min(30, 2 ** attempt))
+            time.sleep(min(30, 2**attempt))
     raise AssertionError("unreachable")
 
 
@@ -99,7 +100,8 @@ def decode(message: bytes) -> tuple[int, np.ndarray, np.ndarray, np.ndarray]:
         ni, nj = eccodes.codes_get(handle, "Ni"), eccodes.codes_get(handle, "Nj")
         lat = np.linspace(
             eccodes.codes_get(handle, "latitudeOfFirstGridPointInDegrees"),
-            eccodes.codes_get(handle, "latitudeOfLastGridPointInDegrees"), nj,
+            eccodes.codes_get(handle, "latitudeOfLastGridPointInDegrees"),
+            nj,
         )
         lon0 = eccodes.codes_get(handle, "longitudeOfFirstGridPointInDegrees")
         lon = lon0 + np.arange(ni) * eccodes.codes_get(handle, "iDirectionIncrementInDegrees")
@@ -110,8 +112,15 @@ def decode(message: bytes) -> tuple[int, np.ndarray, np.ndarray, np.ndarray]:
 
 
 def fetch_open_data(
-    init, region: Region, variable: str = "t2m", members: int | None = 10, max_lead_hours: int = 240,
-    step_hours: int = 6, base: str = OPEN_DATA_URL, get=_get, model: str = "aifs-ens",
+    init,
+    region: Region,
+    variable: str = "t2m",
+    members: int | None = 10,
+    max_lead_hours: int = 240,
+    step_hours: int = 6,
+    base: str = OPEN_DATA_URL,
+    get=_get,
+    model: str = "aifs-ens",
 ) -> xr.DataArray:
     """Read one initialisation over a region, laid out as :func:`downscale.sources.fetch_forecast` does.
 
@@ -154,9 +163,7 @@ def fetch_open_data(
                 continue
             url = file_url(init, lead, kind, base, model)
             index = [json.loads(line) for line in get(url + ".index").decode().splitlines() if line.strip()]
-            records = sorted(
-                (r for r in index if r.get("param") == param), key=lambda r: int(r.get("number") or 0)
-            )
+            records = sorted((r for r in index if r.get("param") == param), key=lambda r: int(r.get("number") or 0))
             if members is not None:
                 records = [r for r in records if int(r.get("number") or 0) < members]
             for record in records:
@@ -172,8 +179,11 @@ def fetch_open_data(
         np.stack(fields)[None],
         dims=("time", "lead_time", "ensemble", "lat", "lon"),
         coords={
-            "time": [np.datetime64(pd.Timestamp(init), "ns")], "lead_time": lead_time,
-            "ensemble": np.arange(fields[0].shape[0]), "lat": coords[0], "lon": coords[1],
+            "time": [np.datetime64(pd.Timestamp(init), "ns")],
+            "lead_time": lead_time,
+            "ensemble": np.arange(fields[0].shape[0]),
+            "lat": coords[0],
+            "lon": coords[1],
         },
         name=variable,
         attrs={"units": "K", "source": f"ECMWF open data, {model}"},

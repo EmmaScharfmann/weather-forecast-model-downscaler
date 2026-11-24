@@ -16,8 +16,8 @@ import logging
 import shutil
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -27,6 +27,7 @@ from downscale.config import load_config
 from downscale.diagnostics import land_mask, mask_sea, sea_report
 from downscale.downscaler import Downscaler
 from downscale.inference import downscale_forecast
+
 
 logger = logging.getLogger("downscale")
 
@@ -65,9 +66,7 @@ def downscale_init(
         if existing == n_members:
             logger.info("skipping %s, already downscaled with %d members", target.name, existing)
             return target
-        logger.warning(
-            "%s holds %d members but the forecast has %d: redoing it", target.name, existing, n_members
-        )
+        logger.warning("%s holds %d members but the forecast has %d: redoing it", target.name, existing, n_members)
         shutil.rmtree(target)
 
     started = time.time()
@@ -88,14 +87,23 @@ def downscale_init(
         logger.warning(
             "the correction over sea is %.1f times the correction over land (%.2f against %.2f K): "
             "the target reanalysis treats water differently, so sea values are not trustworthy",
-            report["correction_ratio_sea_over_land"], report["sea_correction_K"], report["land_correction_K"],
+            report["correction_ratio_sea_over_land"],
+            report["sea_correction_K"],
+            report["land_correction_K"],
         )
     correction = fine.mean(3) - coarse
     logger.info(
         "%s: %d lead times x %d members x %d samples in %.0fs; mean correction %+.2f K, "
         "sample spread %.2f K, range %.1f..%.1f K",
-        target.name, n_lead, n_ensemble, n_samples, time.time() - started, correction.mean(),
-        fine.std(3, ddof=1).mean() if n_samples > 1 else 0.0, fine.min(), fine.max(),
+        target.name,
+        n_lead,
+        n_ensemble,
+        n_samples,
+        time.time() - started,
+        correction.mean(),
+        fine.std(3, ddof=1).mean() if n_samples > 1 else 0.0,
+        fine.min(),
+        fine.max(),
     )
     return target
 
@@ -122,9 +130,9 @@ def map_figure(path: Path, png: Path) -> None:
     index = int(candidates[np.argmax(mean_field.values[candidates])])
     mask = land_mask(ds)
     coarse = mask_sea(ds["t2m_interp"].isel(time=0, lead_time=index, ensemble=0).values - 273.15, mask)
-    fine = np.stack([
-        mask_sea(f, mask) for f in ds["t2m_ds"].isel(time=0, lead_time=index, ensemble=0).values - 273.15
-    ])
+    fine = np.stack(
+        [mask_sea(f, mask) for f in ds["t2m_ds"].isel(time=0, lead_time=index, ensemble=0).values - 273.15]
+    )
     low, high = np.nanpercentile(fine, [1, 99])
     fig, ax = plt.subplots(1, 4, figsize=(20, 4.6), constrained_layout=True)
     panels = [
@@ -173,8 +181,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     cfg = load_config(args.config)
-    forecasts = sorted(args.forecasts) if args.forecasts else sorted(
-        str(p) for p in Path(cfg.paths.forecasts).glob("*.zarr")
+    forecasts = (
+        sorted(args.forecasts) if args.forecasts else sorted(str(p) for p in Path(cfg.paths.forecasts).glob("*.zarr"))
     )
     if not forecasts:
         parser.error("no forecasts found; pass --forecasts or set paths.forecasts")
@@ -184,9 +192,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     model = Downscaler.load(args.model, args.device)
     logger.info("model %s on %s, fine grid %dx%d", model.net.cfg, model.device, *model.lat.shape)
-    done = [
-        downscale_init(Path(f), model, out, cfg.coarse.variable, samples, batch) for f in forecasts
-    ]
+    done = [downscale_init(Path(f), model, out, cfg.coarse.variable, samples, batch) for f in forecasts]
     map_figure(done[-1], out / "map_check.png")
     print(f"\n{len(done)} initialisation(s) downscaled into {out}/ (map: {out / 'map_check.png'})")
     return 0

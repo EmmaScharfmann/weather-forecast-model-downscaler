@@ -16,8 +16,8 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -30,22 +30,23 @@ from downscale.constants import SCORING_REGIONS, elevation_edges
 from downscale.diagnostics import (
     DistributionSamples,
     StationErrors,
-    edge_figure,
-    edge_profile,
     coast_figure,
     coast_profile,
+    edge_figure,
+    edge_profile,
     gain_profile,
     grid_spacing_km,
     improvement_figure,
     land_mask,
-    station_distance_to_coast,
     mask_sea,
     quantile_figure,
     sea_report,
+    station_distance_to_coast,
     station_error_figure,
     suggested_margin,
 )
 from downscale.stations import MeteoFranceHourly, QCConfig, load_stations
+
 
 logger = logging.getLogger("eval")
 
@@ -144,8 +145,12 @@ class EventScores:
                     p, o = probability[:, j][valid], observed[:, j][valid]
                     entry = self.sums.setdefault((method, threshold, int(hour)), np.zeros(6))
                     entry += [
-                        ((p - o) ** 2).sum(), valid.sum(), ((p >= 0.5) & o).sum(),
-                        ((p < 0.5) & o).sum(), ((p >= 0.5) & ~o).sum(), o.sum(),
+                        ((p - o) ** 2).sum(),
+                        valid.sum(),
+                        ((p >= 0.5) & o).sum(),
+                        ((p < 0.5) & o).sum(),
+                        ((p >= 0.5) & ~o).sum(),
+                        o.sum(),
                     ]
 
     def table(self) -> pd.DataFrame:
@@ -156,13 +161,18 @@ class EventScores:
         """
         rows = []
         for (method, threshold, hour), (brier, n, hits, misses, false_alarms, events) in self.sums.items():
-            rows.append({
-                "method": method, "threshold_C": round(threshold - 273.15, 1), "lead_h": hour,
-                "n": int(n), "obs_events": int(events),
-                "brier": brier / n if n else np.nan,
-                "hit_rate": hits / (hits + misses) if hits + misses else np.nan,
-                "false_alarm_ratio": false_alarms / (hits + false_alarms) if hits + false_alarms else np.nan,
-            })
+            rows.append(
+                {
+                    "method": method,
+                    "threshold_C": round(threshold - 273.15, 1),
+                    "lead_h": hour,
+                    "n": int(n),
+                    "obs_events": int(events),
+                    "brier": brier / n if n else np.nan,
+                    "hit_rate": hits / (hits + misses) if hits + misses else np.nan,
+                    "false_alarm_ratio": false_alarms / (hits + false_alarms) if hits + false_alarms else np.nan,
+                }
+            )
         return pd.DataFrame(rows).sort_values(["threshold_C", "method", "lead_h"])
 
 
@@ -193,7 +203,9 @@ def scorecard(results, binned, intervals, events, stations, edges, by_lead, path
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    hours = lambda ds: ds["lead_time"].values / np.timedelta64(1, "h")
+    def hours(ds):
+        return ds["lead_time"].values / np.timedelta64(1, "h")
+
     colour = {"coarse": "tab:blue", "downscaled": "tab:red"}
     fig, ax = plt.subplots(3, 2, figsize=(12, 12), constrained_layout=True)
 
@@ -204,14 +216,21 @@ def scorecard(results, binned, intervals, events, stations, edges, by_lead, path
     ):
         for method in ("coarse", "downscaled"):
             axis.plot(
-                hours(results[method]), results[method][metric].values,
-                color=colour[method], marker="o", ms=3, label=LABELS[method],
+                hours(results[method]),
+                results[method][metric].values,
+                color=colour[method],
+                marker="o",
+                ms=3,
+                label=LABELS[method],
             )
             if intervals:
                 lower, upper = intervals[method]
                 axis.fill_between(
-                    hours(results[method]), lower[metric].values, upper[metric].values,
-                    color=colour[method], alpha=0.15,
+                    hours(results[method]),
+                    lower[metric].values,
+                    upper[metric].values,
+                    color=colour[method],
+                    alpha=0.15,
                 )
         axis.set_title(title)
         axis.set_xlabel("lead time (h)")
@@ -223,11 +242,13 @@ def scorecard(results, binned, intervals, events, stations, edges, by_lead, path
     if len(hourly):
         for metric, marker, style in (("bias", "o", "-"), ("rmse", "s", "--")):
             for method in ("coarse", "downscaled"):
-                grouped = (
-                    hourly[hourly.method == method].groupby("valid_hour")[metric].mean().sort_index()
-                )
+                grouped = hourly[hourly.method == method].groupby("valid_hour")[metric].mean().sort_index()
                 ax[1, 1].plot(
-                    grouped.index, grouped.values, color=colour[method], marker=marker, ls=style,
+                    grouped.index,
+                    grouped.values,
+                    color=colour[method],
+                    marker=marker,
+                    ls=style,
                     label=f"{LABELS[method]}, {metric}",
                 )
         ax[1, 1].axhline(0, color="k", lw=0.8)
@@ -241,8 +262,10 @@ def scorecard(results, binned, intervals, events, stations, edges, by_lead, path
 
     (lat_min, lat_max), (lon_min, lon_max) = SCORING_REGIONS["france"]
     in_box = (
-        (stations.latitude >= lat_min) & (stations.latitude <= lat_max)
-        & (stations.longitude >= lon_min) & (stations.longitude <= lon_max)
+        (stations.latitude >= lat_min)
+        & (stations.latitude <= lat_max)
+        & (stations.longitude >= lon_min)
+        & (stations.longitude <= lon_max)
     ).values
     counts = [
         int((in_box & (stations.elevation.values >= low) & (stations.elevation.values < high)).sum())
@@ -305,25 +328,29 @@ def heatwave_map(peak, stations: xr.Dataset, variable: str, path: Path) -> None:
     fine = mask_sea(ds["t2m_ds"].isel(time=0, lead_time=index).mean(("ensemble", "sample")).values - 273.15, mask)
     observed = stations[variable].sel(time=valid, method="nearest").values - 273.15
     finite_fine = fine[np.isfinite(fine)]
-    low, high = np.nanpercentile(
-        np.concatenate([finite_fine, observed[np.isfinite(observed)]]), [2, 98]
-    )
+    low, high = np.nanpercentile(np.concatenate([finite_fine, observed[np.isfinite(observed)]]), [2, 98])
     fig, ax = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True)
     for axis, (title, field) in zip(
         ax, [("coarse ensemble mean, interpolated", coarse), ("downscaled ensemble mean", fine)]
     ):
         mesh = axis.pcolormesh(ds.lon, ds.lat, field, cmap="RdYlBu_r", vmin=low, vmax=high, shading="auto")
         axis.scatter(
-            stations.longitude, stations.latitude, c=observed, cmap="RdYlBu_r",
-            vmin=low, vmax=high, s=9, edgecolors="k", linewidths=0.2,
+            stations.longitude,
+            stations.latitude,
+            c=observed,
+            cmap="RdYlBu_r",
+            vmin=low,
+            vmax=high,
+            s=9,
+            edgecolors="k",
+            linewidths=0.2,
         )
         axis.set_title(f"{title}\n(dots: station observations)")
         axis.set_aspect(1 / np.cos(np.deg2rad(float(np.mean(ds.lat.values)))))
         fig.colorbar(mesh, ax=axis, label="degC")
     lead_hours = int(ds.lead_time.values[index] / np.timedelta64(1, "h"))
     fig.suptitle(
-        f"valid {valid:%Y-%m-%d %H} UTC, initialised "
-        f"{pd.Timestamp(ds.time.values[0]):%Y-%m-%d} (+{lead_hours} h)"
+        f"valid {valid:%Y-%m-%d %H} UTC, initialised {pd.Timestamp(ds.time.values[0]):%Y-%m-%d} (+{lead_hours} h)"
     )
     fig.savefig(path, dpi=110)
     plt.close(fig)
@@ -363,15 +390,18 @@ def run(cfg, forecast_paths, downscaled_paths, out_dir, provider=None) -> dict:
     if cfg.stations.window:
         start, end = (pd.Timestamp(x) for x in cfg.stations.window)
     stations, _ = load_stations(
-        provider or MeteoFranceHourly(), cfg.region_box, start, end,
-        variables=cfg.stations.variables, cache_dir=cfg.paths.stations_cache,
+        provider or MeteoFranceHourly(),
+        cfg.region_box,
+        start,
+        end,
+        variables=cfg.stations.variables,
+        cache_dir=cfg.paths.stations_cache,
         qc=QCConfig(min_completeness=cfg.stations.min_completeness, primary=cfg.stations.variables[0]),
-        holdout_frac=cfg.stations.holdout_frac, active=cfg.stations.active,
+        holdout_frac=cfg.stations.holdout_frac,
+        active=cfg.stations.active,
         include_unknown_start=cfg.stations.include_unknown_start,
     )
-    logger.info(
-        "%d stations, %d initialisations, window %s .. %s", stations.sizes["station"], len(pairs), start, end
-    )
+    logger.info("%d stations, %d initialisations, window %s .. %s", stations.sizes["station"], len(pairs), start, end)
 
     edges = elevation_edges(cfg.evaluation.elevation_edges)
     bins = ss.default_bins(edges=cfg.evaluation.elevation_edges)
@@ -387,17 +417,26 @@ def run(cfg, forecast_paths, downscaled_paths, out_dir, provider=None) -> dict:
             difference = (at["coarse_on_fine_grid"] - at["coarse"]).values
             logger.info(
                 "reading-path check: mean absolute difference %.2f K, 95th percentile %.2f K",
-                np.nanmean(np.abs(difference)), np.nanpercentile(np.abs(difference), 95),
+                np.nanmean(np.abs(difference)),
+                np.nanpercentile(np.abs(difference), 95),
             )
         cases_all.append(
             ss.score_station_case(
-                at, obs, variable, methods=METHODS, bin_by=None,
+                at,
+                obs,
+                variable,
+                methods=METHODS,
+                bin_by=None,
                 density_alpha_deg=cfg.evaluation.density_alpha_deg,
             )
         )
         cases_binned.append(
             ss.score_station_case(
-                at, obs, variable, methods=METHODS, bin_by=bins,
+                at,
+                obs,
+                variable,
+                methods=METHODS,
+                bin_by=bins,
                 density_alpha_deg=cfg.evaluation.density_alpha_deg,
             )
         )
@@ -413,12 +452,11 @@ def run(cfg, forecast_paths, downscaled_paths, out_dir, provider=None) -> dict:
     results, binned = ss.combine_cases(cases_all), ss.combine_cases(cases_binned)
     intervals = (
         {
-            m: ss.bootstrap_ci(
-                cases_all, m, n_boot=cfg.evaluation.n_bootstrap, block=cfg.evaluation.bootstrap_block
-            )
+            m: ss.bootstrap_ci(cases_all, m, n_boot=cfg.evaluation.n_bootstrap, block=cfg.evaluation.bootstrap_block)
             for m in ("coarse", "downscaled")
         }
-        if len(cases_all) >= 3 else None
+        if len(cases_all) >= 3
+        else None
     )
 
     by_lead = pd.concat({m: results[m].to_dataframe() for m in METHODS}, names=["method"]).reset_index()
@@ -489,7 +527,9 @@ def run(cfg, forecast_paths, downscaled_paths, out_dir, provider=None) -> dict:
     station_error_figure(per_station, ["coarse", "downscaled"], LABELS, out / "station_errors.png")
     first_store = xr.open_zarr(pairs[0][1])
     diagnostics["improvement"] = improvement_figure(
-        per_station, "coarse", "downscaled",
+        per_station,
+        "coarse",
+        "downscaled",
         first_store["orography"].values if "orography" in first_store else None,
         first_store["lat"].values if "orography" in first_store else None,
         first_store["lon"].values if "orography" in first_store else None,
@@ -523,7 +563,8 @@ def run(cfg, forecast_paths, downscaled_paths, out_dir, provider=None) -> dict:
             f"{method}_{kind}_99.9th_degC": round(
                 float(quantiles.loc[quantiles.level == 0.999, f"{method} {kind}"].iloc[0] - 273.15), 2
             )
-            for method in ("coarse", "downscaled") for kind in ("member", "mean")
+            for method in ("coarse", "downscaled")
+            for kind in ("member", "mean")
         },
     }
     (out / "diagnostics.json").write_text(json.dumps(diagnostics, indent=2))
@@ -536,10 +577,16 @@ def run(cfg, forecast_paths, downscaled_paths, out_dir, provider=None) -> dict:
         print(f"  {key:34s} {value}")
     afternoon = event_table[(event_table.obs_events > 0)]
     if len(afternoon):
-        summary_events = afternoon.groupby(["threshold_C", "method"]).agg(
-            events=("obs_events", "sum"), hit_rate=("hit_rate", "mean"),
-            false_alarm_ratio=("false_alarm_ratio", "mean"), brier=("brier", "mean"),
-        ).round(3)
+        summary_events = (
+            afternoon.groupby(["threshold_C", "method"])
+            .agg(
+                events=("obs_events", "sum"),
+                hit_rate=("hit_rate", "mean"),
+                false_alarm_ratio=("false_alarm_ratio", "mean"),
+                brier=("brier", "mean"),
+            )
+            .round(3)
+        )
         print("\nheat events, averaged over the lead times where they occurred")
         print(summary_events.to_string())
 

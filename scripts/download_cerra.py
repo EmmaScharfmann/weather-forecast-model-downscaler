@@ -27,16 +27,17 @@ import json
 import logging
 import shutil
 import sys
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable, Sequence
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 
 from downscale.config import Config, load_config
-from downscale.constants import G, T2M_RANGE_K
+from downscale.constants import T2M_RANGE_K, G
+
 
 logger = logging.getLogger("cerra")
 
@@ -44,8 +45,12 @@ HOURLY_TIMES = [f"{h:02d}:00" for h in range(24)]
 
 
 def build_request(
-    dataset_variables: Sequence[str], year: int, month: int, times: Sequence[str],
-    days: Sequence[int] | None = None, leadtimes: Sequence[str] | None = None,
+    dataset_variables: Sequence[str],
+    year: int,
+    month: int,
+    times: Sequence[str],
+    days: Sequence[int] | None = None,
+    leadtimes: Sequence[str] | None = None,
 ) -> dict:
     """Build one Climate Data Store request.
 
@@ -173,9 +178,12 @@ def crop_box(lat2d: np.ndarray, lon2d: np.ndarray, box: tuple[float, float, floa
         raise ValueError(f"no grid point inside {box}")
     ys, xs = np.nonzero(inside)
     return {
-        "y0": int(ys.min()), "y1": int(ys.max()) + 1,
-        "x0": int(xs.min()), "x1": int(xs.max()) + 1,
-        "grid_shape": [int(s) for s in lat2d.shape], "box": list(box),
+        "y0": int(ys.min()),
+        "y1": int(ys.max()) + 1,
+        "x0": int(xs.min()),
+        "x1": int(xs.max()) + 1,
+        "grid_shape": [int(s) for s in lat2d.shape],
+        "box": list(box),
     }
 
 
@@ -212,9 +220,7 @@ def _clean(ds: xr.Dataset) -> xr.Dataset:
     return ds
 
 
-def expected_times(
-    year: int, month: int, times: Sequence[str], days: Sequence[int] | None = None
-) -> pd.DatetimeIndex:
+def expected_times(year: int, month: int, times: Sequence[str], days: Sequence[int] | None = None) -> pd.DatetimeIndex:
     """List every timestamp a complete month should contain.
 
     :param year: Calendar year.
@@ -249,8 +255,10 @@ def month_days(year: int, month: int, periods: Sequence[Sequence[str]] | None) -
     if not periods:
         return None
     bounds = [
-        (pd.Timestamp(start).normalize() if start else pd.Timestamp.min,
-         pd.Timestamp(end).normalize() if end else pd.Timestamp.max)
+        (
+            pd.Timestamp(start).normalize() if start else pd.Timestamp.min,
+            pd.Timestamp(end).normalize() if end else pd.Timestamp.max,
+        )
         for start, end in periods
     ]
     days = [d for d in range(1, n_days + 1) if any(a <= pd.Timestamp(year, month, d) <= b for a, b in bounds)]
@@ -331,8 +339,13 @@ def load_or_make_crop(out: Path, standardised: xr.Dataset, box) -> dict:
     path.write_text(json.dumps(crop, indent=2))
     logger.info(
         "crop fixed: y %d:%d, x %d:%d of grid %s, giving %d x %d points",
-        crop["y0"], crop["y1"], crop["x0"], crop["x1"], crop["grid_shape"],
-        crop["y1"] - crop["y0"], crop["x1"] - crop["x0"],
+        crop["y0"],
+        crop["y1"],
+        crop["x0"],
+        crop["x1"],
+        crop["grid_shape"],
+        crop["y1"] - crop["y0"],
+        crop["x1"] - crop["x0"],
     )
     return crop
 
@@ -409,14 +422,23 @@ def do_static(cfg: Config, out: Path, client=None, opener: Callable = open_grib)
     _clean(static).to_zarr(target, mode="w")
     logger.info(
         "static fields: orography %.0f..%.0f m, land fraction %.2f",
-        float(static.orography.min()), float(static.orography.max()), float(static.land_sea_mask.mean()),
+        float(static.orography.min()),
+        float(static.orography.max()),
+        float(static.land_sea_mask.mean()),
     )
     return target
 
 
 def do_month(
-    cfg: Config, out: Path, year: int, month: int, keep_grib: bool = False,
-    client=None, opener: Callable = open_grib, hourly: bool = False, days: Sequence[int] | None = None,
+    cfg: Config,
+    out: Path,
+    year: int,
+    month: int,
+    keep_grib: bool = False,
+    client=None,
+    opener: Callable = open_grib,
+    hourly: bool = False,
+    days: Sequence[int] | None = None,
 ) -> tuple[str, list[str]]:
     """Download, crop and check one month.
 
@@ -525,7 +547,10 @@ def consolidate(cfg: Config, out: Path, months: Sequence[tuple[int, int]] | None
     _clean(ds).to_zarr(target, mode="w")
     logger.info(
         "consolidated %d time steps on a %d x %d grid into %s",
-        ds.sizes["time"], ds.sizes["y"], ds.sizes["x"], target,
+        ds.sizes["time"],
+        ds.sizes["y"],
+        ds.sizes["x"],
+        target,
     )
     return target
 
@@ -584,7 +609,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--start", default=None, help="first day, overriding target.periods and target.years")
     parser.add_argument("--end", default=None, help="last day, overriding target.periods and target.years")
     parser.add_argument(
-        "--crop-like", default=None, metavar="DATASET",
+        "--crop-like",
+        default=None,
+        metavar="DATASET",
         help="overrides target.crop_like: take the crop from a published dataset's manifest, "
         "e.g. EmmaScharfmann/cerra-france-t2m-2016-2020, so the grid matches models trained on it",
     )
@@ -612,9 +639,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(build_request(cfg.target.static_variables, first, 1, ["00:00"], days=[1]), indent=1))
         print(json.dumps(build_request([cfg.target.variable], *months[0], times, days[months[0]]), indent=1))
         if hourly:
-            print(json.dumps(build_request(
-                [cfg.target.variable], *months[0], times, days[months[0]], leadtimes=cfg.temporal.forecast_leads
-            ), indent=1))
+            print(
+                json.dumps(
+                    build_request(
+                        [cfg.target.variable],
+                        *months[0],
+                        times,
+                        days[months[0]],
+                        leadtimes=cfg.temporal.forecast_leads,
+                    ),
+                    indent=1,
+                )
+            )
         print(f"... {len(months)} month(s) in total")
         return 0
 
@@ -632,7 +668,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if problems:
                     failed[tag] = problems
                 logger.info(
-                    "[%d/%d] %d-%02d %s", n, len(months), year, month,
+                    "[%d/%d] %d-%02d %s",
+                    n,
+                    len(months),
+                    year,
+                    month,
                     "problems: " + "; ".join(problems) if problems else "ok",
                 )
             except Exception as exc:  # noqa: BLE001

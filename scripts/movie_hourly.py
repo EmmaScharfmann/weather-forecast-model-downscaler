@@ -20,10 +20,11 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import matplotlib
+
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -33,6 +34,7 @@ import xarray as xr  # noqa: E402
 from matplotlib import animation  # noqa: E402
 
 from downscale.config import load_config  # noqa: E402
+
 
 logger = logging.getLogger("movie")
 PARIS = (48.85, 2.35)
@@ -75,7 +77,7 @@ def frames(coarse_path: Path, models: dict[str, Path], variable: str, member: in
     stores = {name: xr.open_zarr(path) for name, path in models.items()}
     first = next(iter(stores.values()))
     coarse = xr.open_zarr(coarse_path)[variable].isel(time=0, ensemble=member).sel(lead_time=first["lead_time"])
-    pick = dict(time=0, ensemble=member, sample=sample)
+    pick = {"time": 0, "ensemble": member, "sample": sample}
     init = pd.Timestamp(first["time"].values[0])
     return {
         "init": init,
@@ -101,7 +103,9 @@ def first_hours(data: dict, hours: int) -> dict:
     :rtype: dict
     """
     return {
-        **data, "valid": data["valid"][:hours], "coarse": data["coarse"][:hours],
+        **data,
+        "valid": data["valid"][:hours],
+        "coarse": data["coarse"][:hours],
         "fields": {name: field[:hours] for name, field in data["fields"].items()},
     }
 
@@ -119,16 +123,22 @@ def observed(cfg, valid: pd.DatetimeIndex) -> xr.Dataset:
     from downscale.stations import MeteoFranceHourly, QCConfig, at_times, load_stations
 
     stations, _ = load_stations(
-        MeteoFranceHourly(), cfg.region_box, valid[0], valid[-1], variables=("t2m",),
-        cache_dir=cfg.paths.stations_cache, qc=QCConfig(min_completeness=cfg.stations.min_completeness),
+        MeteoFranceHourly(),
+        cfg.region_box,
+        valid[0],
+        valid[-1],
+        variables=("t2m",),
+        cache_dir=cfg.paths.stations_cache,
+        qc=QCConfig(min_completeness=cfg.stations.min_completeness),
         active=cfg.stations.active,
     )
     stations = at_times(stations, valid)
     return stations.assign(t2m=stations["t2m"] - 273.15)
 
 
-def coarse_land(coarse_lat: np.ndarray, coarse_lon: np.ndarray, lat: np.ndarray, lon: np.ndarray,
-                land: np.ndarray) -> np.ndarray:
+def coarse_land(
+    coarse_lat: np.ndarray, coarse_lon: np.ndarray, lat: np.ndarray, lon: np.ndarray, land: np.ndarray
+) -> np.ndarray:
     """Land on the coarse grid, from the nearest point of the fine grid; points off the fine grid are not land.
 
     :param coarse_lat: Coarse latitudes.
@@ -173,6 +183,7 @@ def render(data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=P
     valid, lat, lon, land, fields = data["valid"], data["lat"], data["lon"], data["land"], data["fields"]
     hourly = "hourly" in fields
     vmin, vmax = np.percentile(fields["hourly" if hourly else "spatial"][:, land], [1, 99.5])
+
     # The loss only covers land, so the downscaled fields mean nothing over the sea; hide it everywhere alike.
     def shown(field: np.ndarray, mask: np.ndarray = land) -> np.ndarray:
         return np.where(mask, field, np.nan)
@@ -180,8 +191,16 @@ def render(data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=P
     coarse_mask = coarse_land(data["coarse_lat"], data["coarse_lon"], lat, lon, land)
     in_time = ", linear in time" if hourly else ""
     panels = [
-        (f"coarse forecast 0.25°{in_time}", data["coarse_lon"], data["coarse_lat"], shown(data["coarse"], coarse_mask)),
-        *((f"{name} model{in_time if name == 'spatial' else ''}", lon, lat, shown(field)) for name, field in fields.items()),
+        (
+            f"coarse forecast 0.25°{in_time}",
+            data["coarse_lon"],
+            data["coarse_lat"],
+            shown(data["coarse"], coarse_mask),
+        ),
+        *(
+            (f"{name} model{in_time if name == 'spatial' else ''}", lon, lat, shown(field))
+            for name, field in fields.items()
+        ),
     ]
     n_maps = len(panels) + (stations is not None)
     fig = plt.figure(figsize=(4.6 * n_maps, 6.6))
@@ -197,8 +216,13 @@ def render(data: dict, stations: xr.Dataset | None, out: Path, fps: int, point=P
     if stations is not None:
         ax = fig.add_subplot(grid[0, len(panels)])
         dots = ax.scatter(
-            stations["longitude"], stations["latitude"], c=stations["t2m"].isel(time=0), s=5,
-            cmap="RdYlBu_r", vmin=vmin, vmax=vmax,
+            stations["longitude"],
+            stations["latitude"],
+            c=stations["t2m"].isel(time=0),
+            s=5,
+            cmap="RdYlBu_r",
+            vmin=vmin,
+            vmax=vmax,
         )
         ax.set_title(f"{stations.sizes['station']} stations, observed", fontsize=10)
         axes.append(ax)

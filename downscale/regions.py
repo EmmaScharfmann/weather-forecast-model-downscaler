@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
 from .constants import REGION_PRESETS
+
 
 Region = tuple[float, float, float, float]
 
@@ -60,10 +61,12 @@ def crop_indices(region: Region, lat: np.ndarray, lon: np.ndarray) -> tuple[np.n
     else:
         left = np.flatnonzero(lon360 >= west)
         right = np.flatnonzero(lon360 <= east)
-        lon_idx = np.concatenate([
-            left[np.argsort(lon360[left], kind="stable")],
-            right[np.argsort(lon360[right], kind="stable")],
-        ])
+        lon_idx = np.concatenate(
+            [
+                left[np.argsort(lon360[left], kind="stable")],
+                right[np.argsort(lon360[right], kind="stable")],
+            ]
+        )
 
     if lat_idx.size == 0 or lon_idx.size == 0:
         raise ValueError(f"region {region} selects no grid point")

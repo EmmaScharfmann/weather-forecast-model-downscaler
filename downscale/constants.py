@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
+
 #: Standard gravity, used to convert geopotential to height [m s^-2].
 G = 9.80665
 
@@ -79,6 +80,7 @@ def channels(coast_distance: bool = False) -> list[str]:
     """
     static = [*STATIC_CHANNELS, COAST_CHANNEL] if coast_distance else list(STATIC_CHANNELS)
     return ["era5_t2m", *static, *TIME_CHANNELS]
+
 
 #: Copernicus Climate Data Store dataset identifier for the high-resolution target.
 CERRA_DATASET = "reanalysis-cerra-single-levels"

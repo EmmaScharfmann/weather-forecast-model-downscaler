@@ -9,12 +9,16 @@ from downscale.config import Config, load_config
 @pytest.fixture
 def config_file(tmp_path):
     path = tmp_path / "config.yaml"
-    path.write_text(yaml.safe_dump({
-        "region": {"name": "france"},
-        "paths": {"pairs": "data/custom"},
-        "target": {"years": [2015, 2017], "train_years": [2015, 2016]},
-        "training": {"loss": "mse", "epochs": 3},
-    }))
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "region": {"name": "france"},
+                "paths": {"pairs": "data/custom"},
+                "target": {"years": [2015, 2017], "train_years": [2015, 2016]},
+                "training": {"loss": "mse", "epochs": 3},
+            }
+        )
+    )
     return path
 
 

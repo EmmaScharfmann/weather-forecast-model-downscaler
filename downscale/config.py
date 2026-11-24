@@ -15,6 +15,7 @@ import yaml
 
 from .constants import REGION_PRESETS
 
+
 DEFAULT_CONFIG_PATH = Path("config_spatial.yaml")
 #: Times of CERRA's three-hourly analyses.
 CERRA_ANALYSIS_TIMES = [f"{h:02d}:00" for h in range(0, 24, 3)]
@@ -209,7 +210,7 @@ class Config:
         return [y for y in range(int(first), int(last) + 1) if y > int(self.target.train_years[1])]
 
 
-def _build(cls: type[T], values: dict[str, Any] | None) -> T:
+def _build[T](cls: type[T], values: dict[str, Any] | None) -> T:
     """Instantiate a dataclass from a mapping, rejecting unknown keys.
 
     :param cls: Target dataclass.
@@ -289,10 +290,14 @@ def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
     unknown = set(raw) - set(sections)
     if unknown:
         raise ValueError(f"unknown configuration section(s) {sorted(unknown)}")
-    return Config(**{
-        name: _build(cls, raw.get(name))
-        for name, cls in [(f.name, f.default_factory().__class__) for f in fields(Config) if is_dataclass(f.default_factory())]
-    })
+    return Config(
+        **{
+            name: _build(cls, raw.get(name))
+            for name, cls in [
+                (f.name, f.default_factory().__class__) for f in fields(Config) if is_dataclass(f.default_factory())
+            ]
+        }
+    )
 
 
 def apply_cli(config_section: Any, args: Any, names: list[str]) -> None:

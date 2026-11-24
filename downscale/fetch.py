@@ -14,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 import xarray as xr
 
+
 logger = logging.getLogger(__name__)
 
 AUTO, HUB, SOURCE = "auto", "hub", "source"
@@ -59,9 +60,7 @@ def _covers(manifest: dict | None, start: pd.Timestamp, end: pd.Timestamp) -> bo
     if not manifest:
         return False
     if "periods" in manifest:
-        return any(
-            pd.Timestamp(p["start"]) <= start and pd.Timestamp(p["end"]) >= end for p in manifest["periods"]
-        )
+        return any(pd.Timestamp(p["start"]) <= start and pd.Timestamp(p["end"]) >= end for p in manifest["periods"])
     if "start" in manifest and "end" in manifest:
         first, last = pd.Timestamp(manifest["start"]), pd.Timestamp(manifest["end"])
     elif "years" in manifest:
@@ -73,8 +72,14 @@ def _covers(manifest: dict | None, start: pd.Timestamp, end: pd.Timestamp) -> bo
 
 
 def get_stations(
-    start, end, region: str = "france", repo: str | Path | None = None, source: str = AUTO,
-    cache_dir: str | Path = "outputs/cache/stations", provider=None, **kwargs,
+    start,
+    end,
+    region: str = "france",
+    repo: str | Path | None = None,
+    source: str = AUTO,
+    cache_dir: str | Path = "outputs/cache/stations",
+    provider=None,
+    **kwargs,
 ) -> xr.Dataset:
     """Station observations for a period, from a published copy or the network.
 
@@ -112,15 +117,20 @@ def get_stations(
             raise ValueError(f"{repo} does not cover {start} .. {end}; use source='auto' to collect them")
         logger.info("%s does not cover %s .. %s; collecting from the network instead", repo, start, end)
 
-    observations, _ = load_stations(
-        provider or MeteoFranceHourly(), region, start, end, cache_dir=cache_dir, **kwargs
-    )
+    observations, _ = load_stations(provider or MeteoFranceHourly(), region, start, end, cache_dir=cache_dir, **kwargs)
     return observations
 
 
 def get_target(
-    start, end, repo: str | Path | None = None, source: str = AUTO, local: str | Path = "data/cerra",
-    stream: bool = True, load: bool = False, retries: int = 3, **kwargs,
+    start,
+    end,
+    repo: str | Path | None = None,
+    source: str = AUTO,
+    local: str | Path = "data/cerra",
+    stream: bool = True,
+    load: bool = False,
+    retries: int = 3,
+    **kwargs,
 ) -> tuple[xr.Dataset, xr.Dataset]:
     """Reanalysis fields for a period, from a published copy or a local download.
 
@@ -157,7 +167,9 @@ def get_target(
             logger.info("reading the reanalysis for %s .. %s from %s", start, end, repo)
             target, static = load_published_target(repo, stream=stream, **kwargs)
             target = target.sel(time=slice(start, end))
-            return (load_with_retries(target, retries), load_with_retries(static, retries)) if load else (target, static)
+            return (
+                (load_with_retries(target, retries), load_with_retries(static, retries)) if load else (target, static)
+            )
         if source == HUB:
             raise ValueError(f"{repo} does not cover {start} .. {end}; download those dates instead")
         logger.info("%s does not cover %s .. %s; reading the local download instead", repo, start, end)

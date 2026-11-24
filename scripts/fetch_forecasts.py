@@ -20,8 +20,8 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import pandas as pd
 
@@ -29,6 +29,7 @@ from downscale.config import load_config
 from downscale.constants import COARSE_CROP_MARGIN_DEG
 from downscale.open_data import MODELS, fetch_open_data
 from downscale.sources import available_inits, fetch_forecast, forecast_box, open_forecasts, save_forecast, store_name
+
 
 logger = logging.getLogger("fetch")
 OPEN_DATA = "open-data"
@@ -72,8 +73,12 @@ def main(argv: Sequence[str] | None = None, archive=None) -> int:
     parser.add_argument("--config", default=None)
     parser.add_argument("--start", required=True, help="first initialisation")
     parser.add_argument("--end", required=True, help="last initialisation")
-    parser.add_argument("--source", default=None, help=f"overrides forecasts.source; {OPEN_DATA!r} reads AIFS-ENS from ECMWF open data, "
-                        f"'{OPEN_DATA}:MODEL' another of {sorted(MODELS)}")
+    parser.add_argument(
+        "--source",
+        default=None,
+        help=f"overrides forecasts.source; {OPEN_DATA!r} reads AIFS-ENS from ECMWF open data, "
+        f"'{OPEN_DATA}:MODEL' another of {sorted(MODELS)}",
+    )
     parser.add_argument("--members", type=int, default=None, help="overrides forecasts.members")
     parser.add_argument("--max-lead-hours", type=int, default=None, help="overrides forecasts.max_lead_hours")
     parser.add_argument("--out", default=None, help="overrides paths.forecasts")

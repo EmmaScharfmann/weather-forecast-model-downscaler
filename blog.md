@@ -131,23 +131,28 @@ from downscale.inference import downscale_forecast, save_downscaled
 from downscale.plots import map_grid, maps, native_cells, station_maps
 from downscale.regions import parse_region
 from downscale.sources import (
-    available_inits, fetch_forecast, forecast_box, open_forecasts, save_forecast, store_name,
+    available_inits,
+    fetch_forecast,
+    forecast_box,
+    open_forecasts,
+    save_forecast,
+    store_name,
 )
 from downscale.station_interp import curvilinear_for
 from downscale.stations import load_published_stations
 
 MODEL_REPO = "EmmaScharfmann/france-temperature-downscaler"
-FORECASTS = "<earthmover-org>/ecmwf-aifs-ens-forecast-subscription"   # your Earthmover subscription
+FORECASTS = "<earthmover-org>/ecmwf-aifs-ens-forecast-subscription"  # your Earthmover subscription
 FORECASTS_2020 = "hf://datasets/EmmaScharfmann/aifs-ens-france-aug2020"
 CERRA_REPO = "EmmaScharfmann/cerra-france-t2m-2016-2020"
-STATIONS = "EmmaScharfmann/france-stations"   # Météo-France, Aug 2020, Aug 2025, Jan-Jun-Jul 2026
+STATIONS = "EmmaScharfmann/france-stations"  # Météo-France, Aug 2020, Aug 2025, Jan-Jun-Jul 2026
 
-MEMBERS = 10          # AIFS-ENS members to downscale  (out of 51)
+MEMBERS = 10  # AIFS-ENS members to downscale  (out of 51)
 MAX_LEAD_HOURS = 240
-SAMPLES = 4           # members out of the downscaler (total 4 x 10  = 40)
-EVAL_SAMPLES = 1     # both ensembles keep 10 members, and downscaling is 4x faster
+SAMPLES = 4  # members out of the downscaler (total 4 x 10  = 40)
+EVAL_SAMPLES = 1  # both ensembles keep 10 members, and downscaling is 4x faster
 BOX = forecast_box(parse_region("france"), COARSE_CROP_MARGIN_DEG)
-OUT = Path("outputs/tutorial")   # every forecast is fetched and downscaled once, then read from here
+OUT = Path("outputs/tutorial")  # every forecast is fetched and downscaled once, then read from here
 ```
 </details>
 
@@ -171,7 +176,7 @@ model = Downscaler.load(hf_hub_download(MODEL_REPO, "model.pt"))
 LAND = xr.DataArray(model.static["land_sea_mask"] > 0.5, dims=("y", "x"))
 
 downscaled = downscale_forecast(model, coarse, samples=SAMPLES)
-fine = stack_members(downscaled)  
+fine = stack_members(downscaled)
 
 save_forecast(coarse, OUT / "forecasts")
 save_downscaled(downscaled, OUT / "downscaled" / store_name(INIT))
@@ -181,7 +186,7 @@ save_downscaled(downscaled, OUT / "downscaled" / store_name(INIT))
 We can plot the coarse forecast and the downscaled forecast: 
 
 ```python
-LEAD = 60   # hours: 12 UTC on 13 August
+LEAD = 60  # hours: 12 UTC on 13 August
 k = int(np.flatnonzero(coarse.lead_time.values == np.timedelta64(LEAD, "h"))[0])
 valid = pd.Timestamp(downscaled.valid_time.values[0, k])
 
@@ -201,16 +206,49 @@ LABELS = {
     "elevation_unit": "elevation (m)",
 }
 low, high = np.nanpercentile(np.concatenate([raw_mean.ravel(), fine_mean.ravel()]), [1, 99])
-fig = map_grid([
-    dict(title=LABELS["coarse"], lon=model.lon, lat=model.lat, values=raw_mean,
-         vmin=low, vmax=high, label=LABELS["temperature_unit"]),
-    dict(title=LABELS["downscaled"], lon=model.lon, lat=model.lat, values=fine_mean,
-         vmin=low, vmax=high, label=LABELS["temperature_unit"]),
-    dict(title=LABELS["added"], lon=model.lon, lat=model.lat, values=fine_mean - interp_mean,
-         cmap="RdBu_r", vmin=-6, vmax=6, label=LABELS["correction_unit"]),
-    dict(title=LABELS["elevation"], lon=model.lon, lat=model.lat, values=elevation,
-         cmap="terrain", vmin=0, vmax=3000, label=LABELS["elevation_unit"]),
-], title=LABELS["title"])
+fig = map_grid(
+    [
+        dict(
+            title=LABELS["coarse"],
+            lon=model.lon,
+            lat=model.lat,
+            values=raw_mean,
+            vmin=low,
+            vmax=high,
+            label=LABELS["temperature_unit"],
+        ),
+        dict(
+            title=LABELS["downscaled"],
+            lon=model.lon,
+            lat=model.lat,
+            values=fine_mean,
+            vmin=low,
+            vmax=high,
+            label=LABELS["temperature_unit"],
+        ),
+        dict(
+            title=LABELS["added"],
+            lon=model.lon,
+            lat=model.lat,
+            values=fine_mean - interp_mean,
+            cmap="RdBu_r",
+            vmin=-6,
+            vmax=6,
+            label=LABELS["correction_unit"],
+        ),
+        dict(
+            title=LABELS["elevation"],
+            lon=model.lon,
+            lat=model.lat,
+            values=elevation,
+            cmap="terrain",
+            vmin=0,
+            vmax=3000,
+            label=LABELS["elevation_unit"],
+        ),
+    ],
+    title=LABELS["title"],
+)
 ```
 
 ![Screenshot 2026-10-15 at 15.36.54](https://cdn-uploads.huggingface.co/production/uploads/6a2f0f8a8aec62a63aae7447/b7Cl6HVQLZ7EP7RIL99Rf.png)
@@ -240,13 +278,13 @@ def run(archive, init):
 
 def score(downscaled, stations, cerra=None, short_leads=48):
     """Score one downscaled run against the stations and, when given, against CERRA."""
-    downscaled = downscaled.isel(sample=slice(0, EVAL_SAMPLES))   # the run from section c has more
+    downscaled = downscaled.isel(sample=slice(0, EVAL_SAMPLES))  # the run from section c has more
     forecasts = {
         "AIFS-ENS": downscaled.t2m_interp.rename(ensemble="member").load(),
         "AIFS-ENS + downscaler": stack_members(downscaled).load(),
     }
     read = curvilinear_for(model.lat, model.lon, stations).apply
-    observed = at_valid_times(stations.t2m, downscaled.valid_time)          # (time, lead_time, station)
+    observed = at_valid_times(stations.t2m, downscaled.valid_time)  # (time, lead_time, station)
     out = {"stations": {}, "means": {}}
     short = downscaled.lead_time <= np.timedelta64(short_leads, "h")
     for name, forecast in forecasts.items():
@@ -255,10 +293,10 @@ def score(downscaled, stations, cerra=None, short_leads=48):
         out["means"][name] = at.mean("member").sel(lead_time=short).values
     out["observed"] = observed.sel(lead_time=short).values
     if cerra is not None:
-        truth = at_valid_times(cerra.t2m, downscaled.valid_time)             # (time, lead_time, y, x)
+        truth = at_valid_times(cerra.t2m, downscaled.valid_time)  # (time, lead_time, y, x)
         out["cerra"] = {name: lead_scores(f, truth.where(LAND)) for name, f in forecasts.items()}
-        at = read(truth)                                                     # CERRA at the stations
-        out["stations"]["CERRA"] = lead_scores(at, observed)                  # same valid times: the floor
+        at = read(truth)  # CERRA at the stations
+        out["stations"]["CERRA"] = lead_scores(at, observed)  # same valid times: the floor
         out["means"]["CERRA"] = at.sel(lead_time=short).values
     return out
 ```
@@ -266,11 +304,14 @@ def score(downscaled, stations, cerra=None, short_leads=48):
 ```python
 archive_2020 = open_forecasts(FORECASTS_2020)
 inits_2020 = available_inits(archive_2020)
-cerra, _ = get_target(inits_2020[0], inits_2020[-1] + pd.Timedelta(hours=MAX_LEAD_HOURS), repo=CERRA_REPO,
-                      load=True)   # about 30 MB, read once rather than streamed
+cerra, _ = get_target(
+    inits_2020[0], inits_2020[-1] + pd.Timedelta(hours=MAX_LEAD_HOURS), repo=CERRA_REPO, load=True
+)  # about 30 MB, read once rather than streamed
 stations_2020 = load_published_stations(STATIONS, start="2020-08-01", end="2020-08-31")
-print(f"{len(inits_2020)} initialisations, {inits_2020[0]:%d %b} to {inits_2020[-1]:%d %b %Y}; "
-      f"{stations_2020.sizes['station']} stations")
+print(
+    f"{len(inits_2020)} initialisations, {inits_2020[0]:%d %b} to {inits_2020[-1]:%d %b %Y}; "
+    f"{stations_2020.sizes['station']} stations"
+)
 
 runs_2020 = {init: run(archive_2020, init) for init in inits_2020}
 results_2020 = [score(downscaled_2020, stations_2020, cerra) for _, downscaled_2020 in runs_2020.values()]
@@ -283,8 +324,9 @@ coarse_first, first = runs_2020[inits_2020[0]]
 k = int(np.flatnonzero(first.lead_time.values == np.timedelta64(36, "h"))[0])
 valid_2020 = pd.Timestamp(first.valid_time.values[0, k])
 
-raw = native_cells(coarse_first.isel(time=0, lead_time=k).mean("ensemble").load() - ZERO_C,
-                   model.lat, model.lon, LAND.values)
+raw = native_cells(
+    coarse_first.isel(time=0, lead_time=k).mean("ensemble").load() - ZERO_C, model.lat, model.lon, LAND.values
+)
 interp = first.t2m_interp.isel(time=0, lead_time=k).mean("ensemble").where(LAND).values - ZERO_C
 down = stack_members(first).isel(time=0, lead_time=k).mean("member").where(LAND).values - ZERO_C
 truth = cerra.t2m.sel(time=valid_2020).where(LAND).values - ZERO_C
@@ -293,22 +335,33 @@ when = f"valid {valid_2020:%d %b %Y %H} UTC (+36 h)"
 ```
 
 ```python
-fig = maps([
-    ("AIFS-ENS - coarse dataset, resolution 0.25° (~28 km)", model.lon, model.lat, raw),
-    ("CERRA - fine dataset, resolution: 5.5 km (~0.05°)", model.lon, model.lat, truth),
-    ("AIFS-ENS + downscaler - resolution: 5.5 km (~0.05°)", model.lon, model.lat, down),
-], width=4.4, title=f"Ensemble mean 2 m temperature, {when}")
+fig = maps(
+    [
+        ("AIFS-ENS - coarse dataset, resolution 0.25° (~28 km)", model.lon, model.lat, raw),
+        ("CERRA - fine dataset, resolution: 5.5 km (~0.05°)", model.lon, model.lat, truth),
+        ("AIFS-ENS + downscaler - resolution: 5.5 km (~0.05°)", model.lon, model.lat, down),
+    ],
+    width=4.4,
+    title=f"Ensemble mean 2 m temperature, {when}",
+)
 ```
 
 ![Screenshot 2026-10-15 at 15.40.25](https://cdn-uploads.huggingface.co/production/uploads/6a2f0f8a8aec62a63aae7447/TJNpUDaleSOH9htX_eUpQ.png)
 
 ```python
-fig = maps([
-    ("AIFS-ENS minus CERRA", model.lon, model.lat, interp - truth),
-    ("AIFS-ENS + downscaler minus CERRA", model.lon, model.lat, down - truth),
-], cmap="RdBu_r", vmin=-5, vmax=5, label="K", title=f"Error against CERRA, {when}")
+fig = maps(
+    [
+        ("AIFS-ENS minus CERRA", model.lon, model.lat, interp - truth),
+        ("AIFS-ENS + downscaler minus CERRA", model.lon, model.lat, down - truth),
+    ],
+    cmap="RdBu_r",
+    vmin=-5,
+    vmax=5,
+    label="K",
+    title=f"Error against CERRA, {when}",
+)
 for name, error in [("AIFS-ENS", interp - truth), ("AIFS-ENS + downscaler", down - truth)]:
-    print(f"{name:24s} RMSE against CERRA over land {np.sqrt(np.nanmean(error ** 2)):.2f} K")
+    print(f"{name:24s} RMSE against CERRA over land {np.sqrt(np.nanmean(error**2)):.2f} K")
 ```
 
 ![Screenshot 2026-10-15 at 15.41.01](https://cdn-uploads.huggingface.co/production/uploads/6a2f0f8a8aec62a63aae7447/9fNUMPfupWgiW4qAGiah0.png)
@@ -324,12 +377,18 @@ Observations from Météo-France weather stations are used to evaluate the model
 ```python
 # Ensemble means and observations at every station, first 48 h of every run
 names = ("AIFS-ENS", "AIFS-ENS + downscaler")
-fields = {name: np.concatenate([r["means"][name].reshape(-1, r["means"][name].shape[-1]) for r in results_2020])
-          for name in names}
+fields = {
+    name: np.concatenate([r["means"][name].reshape(-1, r["means"][name].shape[-1]) for r in results_2020])
+    for name in names
+}
 observed = np.concatenate([r["observed"].reshape(-1, r["observed"].shape[-1]) for r in results_2020])
 rmse_2020 = {name: station_rmse(fields[name], observed) for name in names}
-fig = station_maps(stations_2020.longitude.values, stations_2020.latitude.values, rmse_2020,
-                   title="RMSE against each station, first 48 h, August 2020")
+fig = station_maps(
+    stations_2020.longitude.values,
+    stations_2020.latitude.values,
+    rmse_2020,
+    title="RMSE against each station, first 48 h, August 2020",
+)
 ```
 
 ![image](https://cdn-uploads.huggingface.co/production/uploads/6a2f0f8a8aec62a63aae7447/0JxjUTCKmMY8RbNE6ZmGS.png)

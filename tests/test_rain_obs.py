@@ -1,4 +1,5 @@
 """Observation readers and observation-aware rainfall metrics."""
+
 import gzip
 
 import numpy as np
@@ -12,7 +13,7 @@ from downscale.rain_obs import Aggregator, at_stations, choose_test_days, gauge_
 
 def blob(cx, cy=20, r=3, peak=10.0, size=40):
     y, x = np.mgrid[0:size, 0:size]
-    return peak * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * r ** 2))
+    return peak * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * r**2))
 
 
 def test_crps_matches_existing_fair_crps_and_reduces_to_mae():
@@ -55,12 +56,15 @@ def test_double_penalty_csi_zero_but_fss_recovers_with_scale():
 
 def test_blurring_lowers_small_scale_power_and_extremes():
     from scipy.ndimage import gaussian_filter
+
     rng = np.random.default_rng(2)
     sharp = rng.gamma(0.3, 4, (5, 64, 64))
     blurred = gaussian_filter(sharp, (0, 3, 3))
     a, b = metrics.spectrum(sharp), metrics.spectrum(blurred)
     assert b["power"][-1] < 0.01 * a["power"][-1]
-    assert metrics.intensity(blurred[:, None], sharp)["q99.9_mm"] < metrics.intensity(sharp[:, None], sharp)["q99.9_mm"]
+    assert (
+        metrics.intensity(blurred[:, None], sharp)["q99.9_mm"] < metrics.intensity(sharp[:, None], sharp)["q99.9_mm"]
+    )
 
 
 def test_complete_box_finds_the_fully_observed_square():
@@ -73,8 +77,8 @@ def test_complete_box_finds_the_fully_observed_square():
 
 def test_complete_box_skips_empty_and_patchy_hours():
     reference = np.full((3, 40, 40), 1.0)
-    reference[1] = np.nan                 # empty hour, like EURADCLIM on 2023-10-30
-    reference[2, ::2, ::2] = np.nan       # patchy hour: no large square is always observed
+    reference[1] = np.nan  # empty hour, like EURADCLIM on 2023-10-30
+    reference[2, ::2, ::2] = np.nan  # patchy hour: no large square is always observed
     row, col, size, hours = metrics.complete_box(reference, min_size=8)
     assert size == 40 and hours.tolist() == [True, False, False]
 
@@ -98,8 +102,17 @@ def test_read_odim_values_nodata_and_coordinates(tmp_path):
         data = np.array([[0.0, 1.5], [-9999000.0, 4.0]])
         h5.create_dataset("dataset1/data1/data", data=data)
         h5["dataset1/data1"].create_group("what").attrs.update({"nodata": -9999000.0})
-        h5.create_group("where").attrs.update({"projdef": projdef.encode(), "UL_lon": 2.0, "UL_lat": 47.0,
-                                              "xscale": 2000.0, "yscale": 2000.0, "xsize": 2, "ysize": 2})
+        h5.create_group("where").attrs.update(
+            {
+                "projdef": projdef.encode(),
+                "UL_lon": 2.0,
+                "UL_lat": 47.0,
+                "xscale": 2000.0,
+                "yscale": 2000.0,
+                "xsize": 2,
+                "ysize": 2,
+            }
+        )
     values, lat, lon = read_odim(path)
     assert values[0, 1] == 1.5 and np.isnan(values[1, 0])
     assert lat[0, 0] < 47.0 and lon[0, 0] > 2.0 and lat[1, 0] < lat[0, 0]
@@ -107,11 +120,13 @@ def test_read_odim_values_nodata_and_coordinates(tmp_path):
 
 
 def test_gauge_file_keeps_good_quality_and_right_labelled_hours(tmp_path):
-    text = ("NUM_POSTE;NOM_USUEL;LAT;LON;ALTI;AAAAMMJJHH;RR1;QRR1;T;QT\n"
-            "13001009;AIX;43.53;5.42;173;2022101501;1.2;1;10;1\n"
-            "13001009;AIX;43.53;5.42;173;2022101502;7.0;2;10;1\n"  # doubtful
-            "13001009;AIX;43.53;5.42;173;2022101503;;1;10;1\n"     # missing
-            "13001009;AIX;43.53;5.42;173;2022101601;3.0;1;10;1\n")  # not requested
+    text = (
+        "NUM_POSTE;NOM_USUEL;LAT;LON;ALTI;AAAAMMJJHH;RR1;QRR1;T;QT\n"
+        "13001009;AIX;43.53;5.42;173;2022101501;1.2;1;10;1\n"
+        "13001009;AIX;43.53;5.42;173;2022101502;7.0;2;10;1\n"  # doubtful
+        "13001009;AIX;43.53;5.42;173;2022101503;;1;10;1\n"  # missing
+        "13001009;AIX;43.53;5.42;173;2022101601;3.0;1;10;1\n"
+    )  # not requested
     source = tmp_path / "H_13_previous-2020-2024.csv.gz"
     source.write_bytes(gzip.compress(text.encode()))
     times = pd.date_range("2022-10-15T01:00", periods=3, freq="h")

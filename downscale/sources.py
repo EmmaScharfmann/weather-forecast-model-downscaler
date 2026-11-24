@@ -8,8 +8,8 @@ Hugging Face Hub, which is how forecasts older than the Earthmover archive are s
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,7 @@ import xarray as xr
 from .constants import ZERO_C
 from .fetch import load_with_retries
 from .regions import Region, crop_indices, to_signed_lon
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,11 @@ GEOPOTENTIAL_ALIASES = ["z_sfc", "z", "geopotential", "geopotential_at_surface"]
 
 #: Forecast store names, in the order they are tried, mapped onto the names used here.
 FORECAST_DIMS = {
-    "init_time": "time", "ensemble_member": "ensemble", "member": "ensemble",
-    "latitude": "lat", "longitude": "lon",
+    "init_time": "time",
+    "ensemble_member": "ensemble",
+    "member": "ensemble",
+    "latitude": "lat",
+    "longitude": "lon",
 }
 FORECAST_VARIABLES = {"t2m": ["t2m", "temperature_2m", "2t"]}
 
@@ -103,7 +107,10 @@ class ERA5:
     """
 
     def __init__(
-        self, dataset: xr.Dataset | None = None, repo: str = ERA5_REPO, group: str = "single/spatial",
+        self,
+        dataset: xr.Dataset | None = None,
+        repo: str = ERA5_REPO,
+        group: str = "single/spatial",
         box: Region | None = None,
     ):
         """
@@ -120,7 +127,9 @@ class ERA5:
         :type box: tuple[float, float, float, float] | None
         """
         ds = dataset if dataset is not None else open_arraylake(repo, group)
-        ds = ds.rename({k: v for k, v in {"valid_time": "time", "latitude": "lat", "longitude": "lon"}.items() if k in ds.dims})
+        ds = ds.rename(
+            {k: v for k, v in {"valid_time": "time", "latitude": "lat", "longitude": "lon"}.items() if k in ds.dims}
+        )
         if box is not None:
             lat_idx, lon_idx = crop_indices(box, ds["lat"].values, ds["lon"].values)
             ds = ds.isel(lat=lat_idx, lon=lon_idx)
@@ -301,7 +310,11 @@ def forecast_box(region: Region, margin_deg: float) -> Region:
 
 
 def fetch_forecast(
-    ds: xr.Dataset, init, region: Region, variable: str = "t2m", members: int | None = None,
+    ds: xr.Dataset,
+    init,
+    region: Region,
+    variable: str = "t2m",
+    members: int | None = None,
     max_lead_hours: int | None = None,
 ) -> xr.DataArray:
     """Read one initialisation over a region.

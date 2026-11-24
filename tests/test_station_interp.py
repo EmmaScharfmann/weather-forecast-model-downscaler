@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 import xarray as xr
+from conftest import signed, terrain
 
 from downscale.station_interp import (
     CurvilinearInterpolator,
@@ -10,11 +11,9 @@ from downscale.station_interp import (
     analysis_baseline,
     downscale_to_stations,
     height_from_geopotential,
-    interpolator_for,
     lapse_correct,
     observations_at_valid_times,
 )
-from conftest import signed, terrain
 
 
 def linear_field(lat, lon):
@@ -82,9 +81,7 @@ def test_curvilinear_reproduces_a_linear_field_and_flags_distant_points(fine_gri
 
 def test_lapse_correction_recovers_the_station_temperature(coarse_grid, points):
     lat, lon = coarse_grid
-    orography = xr.DataArray(
-        terrain(lat[:, None], lon[None, :]), dims=("lat", "lon"), coords={"lat": lat, "lon": lon}
-    )
+    orography = xr.DataArray(terrain(lat[:, None], lon[None, :]), dims=("lat", "lon"), coords={"lat": lat, "lon": lon})
     model_temperature = 300 - 0.0065 * orography
     station_lat, station_lon = points
     elevation = terrain(station_lat, station_lon) + 250.0
@@ -97,12 +94,14 @@ def test_lapse_correction_recovers_the_station_temperature(coarse_grid, points):
             "elevation": ("station", elevation),
         },
     )
-    forecast = xr.Dataset({
-        "t2m": model_temperature.expand_dims(
-            time=[np.datetime64("2023-08-05")],
-            lead_time=np.array([6], "timedelta64[h]").astype("timedelta64[ns]"),
-        )
-    })
+    forecast = xr.Dataset(
+        {
+            "t2m": model_temperature.expand_dims(
+                time=[np.datetime64("2023-08-05")],
+                lead_time=np.array([6], "timedelta64[h]").astype("timedelta64[ns]"),
+            )
+        }
+    )
     result = downscale_to_stations(forecast, stations, "t2m", orography=orography)
     truth = 300 - 0.0065 * elevation
     assert np.allclose((result.bilinear - truth).values.ravel(), 0.0065 * 250, atol=2e-3)
@@ -141,7 +140,9 @@ def test_analysis_baseline_fetches_each_valid_time_once(coarse_grid, station_set
         {"t2m": (("time", "lead_time", "lat", "lon"), np.zeros((2, 12, lat.size, lon.size), "f4"))},
         coords={
             "time": np.array(["2023-08-05T00:00", "2023-08-07T00:00"], "datetime64[ns]"),
-            "lead_time": lead, "lat": lat, "lon": lon,
+            "lead_time": lead,
+            "lat": lat,
+            "lon": lon,
         },
     )
     baseline = analysis_baseline(analysis_source, forecast, station_set, "t2m")

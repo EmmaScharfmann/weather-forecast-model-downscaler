@@ -25,19 +25,19 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
-import numpy as np
 import pandas as pd
 import xarray as xr
 
 from downscale.config import load_config
 from downscale.constants import elevation_edges
-from downscale.downscaler import Downscaler
 from downscale.diagnostics import floor_figure, score_against_stations
+from downscale.downscaler import Downscaler
 from downscale.station_interp import curvilinear_for
 from downscale.stations import MeteoFranceHourly, QCConfig, load_stations
+
 
 logger = logging.getLogger("floor")
 FIELDS = ["coarse", "downscaled", "target"]
@@ -62,9 +62,15 @@ def load_period(pairs_dir: Path, start: pd.Timestamp, end: pd.Timestamp) -> xr.D
     :raises ValueError: If the period contains no time.
     """
     store = pairs_dir / "pairs.zarr"
-    ds = xr.open_zarr(store) if store.exists() else xr.open_mfdataset(
-        [str(p) for p in sorted((pairs_dir / "months").glob("pairs_*.zarr"))],
-        engine="zarr", combine="nested", concat_dim="time",
+    ds = (
+        xr.open_zarr(store)
+        if store.exists()
+        else xr.open_mfdataset(
+            [str(p) for p in sorted((pairs_dir / "months").glob("pairs_*.zarr"))],
+            engine="zarr",
+            combine="nested",
+            concat_dim="time",
+        )
     )
     ds = ds.sel(time=slice(start, end))
     if ds.sizes["time"] == 0:
@@ -104,14 +110,16 @@ def main(argv: Sequence[str] | None = None, provider=None) -> int:
     pairs = load_period(Path(args.pairs or cfg.paths.pairs), start, end)
     times = pd.DatetimeIndex(pairs.time.values)
     model = Downscaler.load(args.model, args.device)
-    predicted = model.predict(
-        pairs.coarse_t2m.values.astype("f4"), times.to_numpy(), members=args.members
-    ).mean(1)
+    predicted = model.predict(pairs.coarse_t2m.values.astype("f4"), times.to_numpy(), members=args.members).mean(1)
     logger.info("%d time(s) between %s and %s", len(times), times.min(), times.max())
 
     stations, report = load_stations(
-        provider or MeteoFranceHourly(), cfg.region_box, times.min(), times.max(),
-        variables=cfg.stations.variables, cache_dir=args.cache or cfg.paths.stations_cache,
+        provider or MeteoFranceHourly(),
+        cfg.region_box,
+        times.min(),
+        times.max(),
+        variables=cfg.stations.variables,
+        cache_dir=args.cache or cfg.paths.stations_cache,
         qc=QCConfig(min_completeness=cfg.stations.min_completeness, primary=cfg.stations.variables[0]),
         holdout_frac=cfg.stations.holdout_frac,
     )
@@ -119,22 +127,14 @@ def main(argv: Sequence[str] | None = None, provider=None) -> int:
 
     interpolator = curvilinear_for(model.lat, model.lon, stations, k=4)
     fields = {
-        "coarse": interpolator.apply(
-            xr.DataArray(pairs.coarse_t2m.values, dims=("time", "y", "x"))
-        ).values,
+        "coarse": interpolator.apply(xr.DataArray(pairs.coarse_t2m.values, dims=("time", "y", "x"))).values,
         "downscaled": interpolator.apply(xr.DataArray(predicted, dims=("time", "y", "x"))).values,
-        "target": interpolator.apply(
-            xr.DataArray(pairs.fine_t2m.values, dims=("time", "y", "x"))
-        ).values,
+        "target": interpolator.apply(xr.DataArray(pairs.fine_t2m.values, dims=("time", "y", "x"))).values,
     }
-    observed = stations[cfg.stations.variables[0]].reindex(
-        time=times.to_numpy().astype("datetime64[ns]")
-    ).values
+    observed = stations[cfg.stations.variables[0]].reindex(time=times.to_numpy().astype("datetime64[ns]")).values
 
     edges = elevation_edges(cfg.evaluation.elevation_edges)
-    scores = score_against_stations(
-        fields, observed, stations.elevation.values, times.hour.values, edges
-    )
+    scores = score_against_stations(fields, observed, stations.elevation.values, times.hour.values, edges)
     scores.to_csv(out / "floor.csv", index=False)
     floor_figure(scores, out / "floor.png", fields=FIELDS, labels=LABELS)
 
@@ -150,9 +150,7 @@ def main(argv: Sequence[str] | None = None, provider=None) -> int:
     gap = summary["rmse_K"]["downscaled"] - floor
     recoverable = summary["rmse_K"]["coarse"] - floor
     summary["remaining_gap_to_floor_K"] = round(gap, 3)
-    summary["share_of_recoverable_error_removed"] = (
-        round(1 - gap / recoverable, 3) if recoverable > 0 else None
-    )
+    summary["share_of_recoverable_error_removed"] = round(1 - gap / recoverable, 3) if recoverable > 0 else None
     (out / "floor.json").write_text(json.dumps(summary, indent=2))
 
     print("\nRMSE against stations over the target's own period (K)")

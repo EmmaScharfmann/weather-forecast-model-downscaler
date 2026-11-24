@@ -9,13 +9,15 @@ forecasts have one member. Which output each metric sees matters:
 * occurrence, structure and intensity use individual members, because an
   ensemble mean is smooth by construction and would be judged on its blur.
 """
+
 from __future__ import annotations
 
 import numpy as np
 from scipy.ndimage import uniform_filter
 
-THRESHOLDS = (0.1, 1.0, 5.0, 10.0)        # mm/h
-FSS_SIZES = (1, 3, 5, 9, 17, 33)          # cells; 0.1° ≈ 8-11 km over France
+
+THRESHOLDS = (0.1, 1.0, 5.0, 10.0)  # mm/h
+FSS_SIZES = (1, 3, 5, 9, 17, 33)  # cells; 0.1° ≈ 8-11 km over France
 QUANTILES = (0.9, 0.99, 0.999)
 
 
@@ -28,8 +30,11 @@ def amount(forecast, reference):
     mean = forecast.mean(1)
     ok = _valid(reference)
     error = mean[ok] - reference[ok]
-    return {"bias_mm": float(error.mean()), "mae_mm": float(np.abs(error).mean()),
-            "rmse_mm": float(np.sqrt((error ** 2).mean()))}
+    return {
+        "bias_mm": float(error.mean()),
+        "mae_mm": float(np.abs(error).mean()),
+        "rmse_mm": float(np.sqrt((error**2).mean())),
+    }
 
 
 def crps(forecast, reference):
@@ -44,7 +49,7 @@ def crps(forecast, reference):
         return {"crps_mm": float(skill), "ensemble_crps_mm": float(skill)}
     ordered = np.sort(forecast, axis=1)
     weights = (2 * np.arange(members) - members + 1).reshape(1, -1, *[1] * (forecast.ndim - 2))
-    spread = (weights * ordered).sum(1) / (members * members)        # = E|X-X'| / 2
+    spread = (weights * ordered).sum(1) / (members * members)  # = E|X-X'| / 2
     ensemble = skill - spread[ok].mean()
     fair = skill - spread[ok].mean() * members / (members - 1)
     return {"crps_mm": float(fair), "ensemble_crps_mm": float(ensemble)}
@@ -111,8 +116,10 @@ def intensity(forecast, reference, quantiles=QUANTILES):
     ok = _valid(reference)
     values = forecast[np.broadcast_to(ok[:, None], forecast.shape)]
     truth = reference[ok]
-    result = {"wet_fraction_0.1mm": float(np.mean(values >= 0.1)),
-              "reference_wet_fraction_0.1mm": float(np.mean(truth >= 0.1))}
+    result = {
+        "wet_fraction_0.1mm": float(np.mean(values >= 0.1)),
+        "reference_wet_fraction_0.1mm": float(np.mean(truth >= 0.1)),
+    }
     for q in quantiles:
         result[f"q{q * 100:g}_mm"] = float(np.quantile(values, q))
         result[f"reference_q{q * 100:g}_mm"] = float(np.quantile(truth, q))
@@ -123,8 +130,11 @@ def qq(forecast, reference, quantiles=np.linspace(0.9, 0.9999, 60)):
     """Quantile pairs for a Q-Q plot of the wet tail."""
     ok = _valid(reference)
     values = forecast[np.broadcast_to(ok[:, None], forecast.shape)]
-    return {"quantiles": quantiles.tolist(), "forecast": np.quantile(values, quantiles).tolist(),
-            "reference": np.quantile(reference[ok], quantiles).tolist()}
+    return {
+        "quantiles": quantiles.tolist(),
+        "forecast": np.quantile(values, quantiles).tolist(),
+        "reference": np.quantile(reference[ok], quantiles).tolist(),
+    }
 
 
 def complete_box(reference, min_size=32):
@@ -171,8 +181,12 @@ def spectrum(fields, cell_km=10.0):
 
 def all_scores(forecast, reference, gridded=True, cell_km=10.0):
     """Every metric of the blog's table for one forecast against one reference."""
-    result = {"amount": amount(forecast, reference), "probability": crps(forecast, reference),
-              "occurrence": occurrence(forecast, reference), "intensity": intensity(forecast, reference)}
+    result = {
+        "amount": amount(forecast, reference),
+        "probability": crps(forecast, reference),
+        "occurrence": occurrence(forecast, reference),
+        "intensity": intensity(forecast, reference),
+    }
     if gridded:
         result["structure"] = structure(forecast, reference, cell_km=cell_km)
     return result

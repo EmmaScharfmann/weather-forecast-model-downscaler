@@ -25,8 +25,8 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -35,6 +35,7 @@ import xarray as xr
 from downscale.config import load_config
 from downscale.constants import elevation_edges
 from downscale.diagnostics import distance_to_coast_km, grid_spacing_km, land_mask
+
 
 logger = logging.getLogger("predictability")
 COAST_EDGES = [0, 10, 25, 50, 100, 200, 1e6]
@@ -68,15 +69,13 @@ class ClimatologyAccumulator:
         :returns: ``None``
         :rtype: None
         """
-        group = (times.month.values - 1) * len(self.hours) + np.array(
-            [self.hours[h] for h in times.hour.values]
-        )
+        group = (times.month.values - 1) * len(self.hours) + np.array([self.hours[h] for h in times.hour.values])
         for index in np.unique(group):
             chosen = group == index
             self.group_sum[index] += residual[chosen].sum(axis=0)
             self.group_count[index] += chosen.sum()
         self.total_sum += residual.sum(axis=0)
-        self.total_squared += (residual ** 2).sum(axis=0)
+        self.total_squared += (residual**2).sum(axis=0)
         self.n += len(times)
 
     def explained_fraction(self) -> tuple[np.ndarray, np.ndarray]:
@@ -86,21 +85,24 @@ class ClimatologyAccumulator:
         :rtype: tuple[numpy.ndarray, numpy.ndarray]
         """
         grand_mean = self.total_sum / self.n
-        total = self.total_squared - self.n * grand_mean ** 2
+        total = self.total_squared - self.n * grand_mean**2
         populated = self.group_count > 0
         group_mean = np.zeros_like(self.group_sum)
         group_mean[populated] = self.group_sum[populated] / self.group_count[populated, None, None]
-        explained = (
-            (self.group_count[:, None, None] * (group_mean - grand_mean) ** 2)[populated].sum(axis=0)
-        )
+        explained = (self.group_count[:, None, None] * (group_mean - grand_mean) ** 2)[populated].sum(axis=0)
         with np.errstate(invalid="ignore", divide="ignore"):
             fraction = np.where(total > 0, explained / total, np.nan)
         return fraction, total / max(self.n - 1, 1)
 
 
 def band_table(
-    fraction: np.ndarray, variance: np.ndarray, values: np.ndarray, edges: Sequence[float],
-    mask: np.ndarray, name: str, unit: str,
+    fraction: np.ndarray,
+    variance: np.ndarray,
+    values: np.ndarray,
+    edges: Sequence[float],
+    mask: np.ndarray,
+    name: str,
+    unit: str,
 ) -> pd.DataFrame:
     """Summarise the explained fraction within bands of a field.
 
@@ -128,13 +130,15 @@ def band_table(
         if not chosen.any():
             continue
         label = f"{low:.0f}-{high:.0f} {unit}" if high < 1e5 else f"above {low:.0f} {unit}"
-        rows.append({
-            "grouping": name,
-            "band": label,
-            "n_points": int(chosen.sum()),
-            "correction_sd_K": round(float(np.sqrt(variance[chosen].mean())), 3),
-            "explained_fraction": round(float(fraction[chosen].mean()), 3),
-        })
+        rows.append(
+            {
+                "grouping": name,
+                "band": label,
+                "n_points": int(chosen.sum()),
+                "correction_sd_K": round(float(np.sqrt(variance[chosen].mean())), 3),
+                "explained_fraction": round(float(fraction[chosen].mean()), 3),
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -175,7 +179,8 @@ def predictability_figure(table: pd.DataFrame, fraction: np.ndarray, lat2d, lon2
         axis.set_xticks(positions)
         axis.set_xticklabels(
             [f"{band}\nsd {sd:.1f} K" for band, sd in zip(subset.band, subset.correction_sd_K)],
-            fontsize=7, rotation=15,
+            fontsize=7,
+            rotation=15,
         )
         axis.set_ylim(0, 1)
         axis.set_ylabel("explained fraction")
@@ -207,9 +212,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     store = pairs_dir / "pairs.zarr"
-    ds = xr.open_zarr(store) if store.exists() else xr.open_mfdataset(
-        [str(p) for p in sorted((pairs_dir / "months").glob("pairs_*.zarr"))],
-        engine="zarr", combine="nested", concat_dim="time",
+    ds = (
+        xr.open_zarr(store)
+        if store.exists()
+        else xr.open_mfdataset(
+            [str(p) for p in sorted((pairs_dir / "months").glob("pairs_*.zarr"))],
+            engine="zarr",
+            combine="nested",
+            concat_dim="time",
+        )
     )
     first, last = int(cfg.target.train_years[0]), int(cfg.target.train_years[1])
     ds = ds.sel(time=slice(f"{first}-01-01", f"{last}-12-31T23:59"))
@@ -231,16 +242,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         mask = np.ones(shape, bool)
     spacing = grid_spacing_km(static.lat.values, static.lon.values)
     distance = distance_to_coast_km(mask, spacing)
-    table = pd.concat([
-        band_table(
-            fraction, variance, static.cerra_orography.values,
-            list(elevation_edges(cfg.evaluation.elevation_edges)), mask, "elevation", "m",
-        ),
-        band_table(fraction, variance, distance, COAST_EDGES, mask, "distance from the coast", "km"),
-    ], ignore_index=True)
+    table = pd.concat(
+        [
+            band_table(
+                fraction,
+                variance,
+                static.cerra_orography.values,
+                list(elevation_edges(cfg.evaluation.elevation_edges)),
+                mask,
+                "elevation",
+                "m",
+            ),
+            band_table(fraction, variance, distance, COAST_EDGES, mask, "distance from the coast", "km"),
+        ],
+        ignore_index=True,
+    )
     table.to_csv(out / "predictability.csv", index=False)
-    predictability_figure(table, np.where(mask, fraction, np.nan), static.lat.values, static.lon.values,
-                          out / "predictability.png")
+    predictability_figure(
+        table, np.where(mask, fraction, np.nan), static.lat.values, static.lon.values, out / "predictability.png"
+    )
 
     coastal = mask & (distance < 25)
     inland = mask & (distance >= 25)

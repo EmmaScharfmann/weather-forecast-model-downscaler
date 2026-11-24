@@ -1,4 +1,5 @@
 """Forecast look-ahead, accumulation consistency and trajectory continuity."""
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -11,21 +12,28 @@ from downscale.rain_temporal import context_inputs, hourly_baseline, trajectory_
 
 def pack():
     values = np.zeros((24, 3, 9, 11), dtype="float32")
-    values[:, 0] = np.repeat([1., 4., 0., 2.], 6)[:, None, None]
-    values[:, 1] = np.repeat([280., 286., 283., 281.], 6)[:, None, None]
+    values[:, 0] = np.repeat([1.0, 4.0, 0.0, 2.0], 6)[:, None, None]
+    values[:, 1] = np.repeat([280.0, 286.0, 283.0, 281.0], 6)[:, None, None]
     values[:, 2] = np.tile(np.arange(1, 7) / 6, 4)[:, None, None]
-    return xr.Dataset({"predictors": (("time", "variable", "lat", "lon"), values),
-                       "target": (("time", "lat", "lon"), values[:, 0])},
-                      coords={"time": pd.date_range("2021-01-01T01:00", periods=24, freq="h"),
-                              "variable": ["tp", "t2m", "phase"], "lat": np.arange(9), "lon": np.arange(11)},
-                      attrs={"forecast_interval_hours": 6, "precipitation_units": "mm", "interval": "(time-1h,time]"})
+    return xr.Dataset(
+        {"predictors": (("time", "variable", "lat", "lon"), values), "target": (("time", "lat", "lon"), values[:, 0])},
+        coords={
+            "time": pd.date_range("2021-01-01T01:00", periods=24, freq="h"),
+            "variable": ["tp", "t2m", "phase"],
+            "lat": np.arange(9),
+            "lon": np.arange(11),
+        },
+        attrs={"forecast_interval_hours": 6, "precipitation_units": "mm", "interval": "(time-1h,time]"},
+    )
 
 
 def test_cumulative_interpolation_preserves_totals_and_dry_intervals():
     ds = pack()
     baseline = hourly_baseline(ds)
     assert (baseline >= 0).all()
-    np.testing.assert_allclose(baseline.reshape(4, 6, 9, 11).sum(1), ds.predictors.values[:, 0].reshape(4, 6, 9, 11).sum(1), rtol=1e-6)
+    np.testing.assert_allclose(
+        baseline.reshape(4, 6, 9, 11).sum(1), ds.predictors.values[:, 0].reshape(4, 6, 9, 11).sum(1), rtol=1e-6
+    )
     np.testing.assert_array_equal(baseline[12:18], 0)
     assert not np.all(baseline[:6] == 1)
     changed = ds.copy(deep=True)
@@ -52,8 +60,8 @@ def test_context_and_cumulative_rain_do_not_bridge_missing_events():
     ds = pack()
     ds = ds.assign_coords(time=np.concatenate([ds.time.values[:12], ds.time.values[12:] + np.timedelta64(30, "D")]))
     a, names = context_inputs(ds)
-    assert a[11, names.index("future_context_weight"), 0, 0] < .1
-    assert a[12, names.index("past_context_weight"), 0, 0] < .1
+    assert a[11, names.index("future_context_weight"), 0, 0] < 0.1
+    assert a[12, names.index("past_context_weight"), 0, 0] < 0.1
     changed = ds.copy(deep=True)
     changed.predictors.values[12:, :2] += 100
     b, _ = context_inputs(changed)
@@ -63,18 +71,18 @@ def test_context_and_cumulative_rain_do_not_bridge_missing_events():
 def test_noise_does_not_reset_at_six_hour_boundaries():
     torch.manual_seed(12)
     n = trajectory_noise(pack().time.values, 2048, 1, 1, factor=1).squeeze()
-    assert torch.all((n.var(1) > .85) & (n.var(1) < 1.15))
+    assert torch.all((n.var(1) > 0.85) & (n.var(1) < 1.15))
     # Member identity survives the window transition; independent redraws would
     # have correlation near zero here.
     correlation = torch.corrcoef(torch.stack([n[5], n[6]]))[0, 1]
-    assert correlation > .95
+    assert correlation > 0.95
 
 
 def test_prediction_is_independent_of_window_batching(tmp_path):
     ds = pack()
     x, mean, std = features(ds, temporal_context=True)
     net = RainNet(x.shape[1], RainConfig(base=4, depth=2, temporal_context=True))
-    torch.nn.init.normal_(net.unet.out.weight, std=.02)
+    torch.nn.init.normal_(net.unet.out.weight, std=0.02)
     model = tmp_path / "model.pt"
     save_model(model, net, ds, mean, std)
     torch.manual_seed(123)
@@ -89,7 +97,7 @@ def test_increment_loss_penalizes_missing_real_changes():
     truth[6:] = 5
     pred = torch.ones(12, 2, 3, 3) * 2
     basic = rain_loss(pred, truth, 6)
-    temporal = rain_loss(pred, truth, 6, sequence_hours=12, temporal_weight=.3)
+    temporal = rain_loss(pred, truth, 6, sequence_hours=12, temporal_weight=0.3)
     assert temporal > basic
 
 

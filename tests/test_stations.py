@@ -3,9 +3,9 @@
 import numpy as np
 import pandas as pd
 import pytest
-import xarray as xr
 
 from downscale.stations import QCConfig, holdout_mask, load_stations
+
 
 START, END = pd.Timestamp("2023-08-05"), pd.Timestamp("2023-08-07 23:00")
 
@@ -36,8 +36,10 @@ class FakeProvider:
         lat_min, lat_max, lon_min, lon_max = region
         table = self.table
         inside = (
-            (table.latitude >= lat_min) & (table.latitude <= lat_max)
-            & (table.longitude >= lon_min) & (table.longitude <= lon_max)
+            (table.latitude >= lat_min)
+            & (table.latitude <= lat_max)
+            & (table.longitude >= lon_min)
+            & (table.longitude <= lon_max)
         )
         return table[inside].copy()
 
@@ -55,12 +57,20 @@ class FakeProvider:
                 series.iloc[5] = -9999.0
                 series.iloc[9] = 999.0
             for variable in variables:
-                rows.append(pd.DataFrame({
-                    "station_id": station_id, "variable": variable,
-                    "time": series.index, "value": series.values,
-                }))
-        return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(
-            columns=["station_id", "variable", "time", "value"]
+                rows.append(
+                    pd.DataFrame(
+                        {
+                            "station_id": station_id,
+                            "variable": variable,
+                            "time": series.index,
+                            "value": series.values,
+                        }
+                    )
+                )
+        return (
+            pd.concat(rows, ignore_index=True)
+            if rows
+            else pd.DataFrame(columns=["station_id", "variable", "time", "value"])
         )
 
 
@@ -122,19 +132,20 @@ def test_a_narrower_window_is_served_from_a_wider_cache(provider, tmp_path):
     load_stations(provider, (40, 50, 0, 10), START, END, cache_dir=tmp_path / "cache")
     calls = len(provider.fetch_calls)
     ds, _ = load_stations(
-        provider, (40, 50, 0, 10), pd.Timestamp("2023-08-06"), pd.Timestamp("2023-08-06 23:00"),
+        provider,
+        (40, 50, 0, 10),
+        pd.Timestamp("2023-08-06"),
+        pd.Timestamp("2023-08-06 23:00"),
         cache_dir=tmp_path / "cache",
     )
-    assert [c for c in provider.fetch_calls[calls:]] == [["G"]]
+    assert list(provider.fetch_calls[calls:]) == [["G"]]
     assert ds.sizes["time"] == 24
 
 
 def test_a_wider_window_triggers_a_fetch(provider, tmp_path):
     load_stations(provider, (40, 50, 0, 10), START, END, cache_dir=tmp_path / "cache")
     calls = len(provider.fetch_calls)
-    load_stations(
-        provider, (40, 50, 0, 10), START, pd.Timestamp("2023-08-09 23:00"), cache_dir=tmp_path / "cache"
-    )
+    load_stations(provider, (40, 50, 0, 10), START, pd.Timestamp("2023-08-09 23:00"), cache_dir=tmp_path / "cache")
     assert len(provider.fetch_calls) == calls + 1
 
 
@@ -143,9 +154,7 @@ def test_unknown_start_and_overlap_options(provider, tmp_path):
         provider, (40, 50, 0, 10), START, END, cache_dir=tmp_path / "cache", include_unknown_start=True
     )
     assert "F" in ds.station.values
-    overlap, _ = load_stations(
-        provider, (40, 50, 0, 10), START, END, cache_dir=tmp_path / "cache", active="overlap"
-    )
+    overlap, _ = load_stations(provider, (40, 50, 0, 10), START, END, cache_dir=tmp_path / "cache", active="overlap")
     assert "G" in overlap.station.values
 
 
@@ -184,31 +193,51 @@ def test_timezone_aware_timestamps_raise(provider, tmp_path):
 
 def test_custom_quality_thresholds_are_applied(provider, tmp_path):
     ds, _ = load_stations(
-        provider, (40, 50, 0, 10), START, END, cache_dir=tmp_path / "cache",
+        provider,
+        (40, 50, 0, 10),
+        START,
+        END,
+        cache_dir=tmp_path / "cache",
         qc=QCConfig(min_completeness=0.3),
     )
     assert "D" in ds.station.values
+
 
 def published_two_periods(folder):
     """Write a published station set covering two separate months."""
     import json
 
-    meta = pd.DataFrame({
-        "station_id": ["a", "b", "c"], "name": ["A", "B", "C"], "latitude": [45.0, 46.0, 47.0],
-        "longitude": [1.0, 2.0, 3.0], "elevation_m": [10.0, 200.0, 900.0], "holdout": [False, True, False],
-    })
+    meta = pd.DataFrame(
+        {
+            "station_id": ["a", "b", "c"],
+            "name": ["A", "B", "C"],
+            "latitude": [45.0, 46.0, 47.0],
+            "longitude": [1.0, 2.0, 3.0],
+            "elevation_m": [10.0, 200.0, 900.0],
+            "holdout": [False, True, False],
+        }
+    )
     first = pd.date_range("2020-08-01", "2020-08-31", freq="1h")
     second = pd.date_range("2025-08-01", "2025-08-31", freq="1h")
-    rows = [pd.DataFrame({"station_id": s, "time": t, "t2m": 290.0}) for s, t in
-            (("a", first), ("b", first), ("b", second), ("c", second))]
+    rows = [
+        pd.DataFrame({"station_id": s, "time": t, "t2m": 290.0})
+        for s, t in (("a", first), ("b", first), ("b", second), ("c", second))
+    ]
     folder.mkdir()
     meta.to_parquet(folder / "metadata.parquet", index=False)
     pd.concat(rows).to_parquet(folder / "observations.parquet", index=False)
-    (folder / "manifest.json").write_text(json.dumps({
-        "start": "2020-08-01 00:00:00", "end": "2025-08-31 00:00:00",
-        "periods": [{"start": "2020-08-01 00:00:00", "end": "2020-08-31 00:00:00"},
-                    {"start": "2025-08-01 00:00:00", "end": "2025-08-31 00:00:00"}],
-    }))
+    (folder / "manifest.json").write_text(
+        json.dumps(
+            {
+                "start": "2020-08-01 00:00:00",
+                "end": "2025-08-31 00:00:00",
+                "periods": [
+                    {"start": "2020-08-01 00:00:00", "end": "2020-08-31 00:00:00"},
+                    {"start": "2025-08-01 00:00:00", "end": "2025-08-31 00:00:00"},
+                ],
+            }
+        )
+    )
     return folder
 
 
@@ -247,6 +276,7 @@ def test_loading_retries_a_timeout_and_then_gives_up():
             return "loaded"
 
     import time
+
     sleep, time.sleep = time.sleep, lambda s: None
     try:
         assert fetch.load_with_retries(Flaky(), 3) == "loaded"

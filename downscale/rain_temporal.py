@@ -1,4 +1,5 @@
 """Neighbouring forecast context and continuous stochastic rainfall trajectories."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -39,12 +40,14 @@ def hourly_baseline(ds, block_windows=744):
         for a in range(0, windows, block_windows):
             b = min(windows, a + block_windows)
             lo, hi = max(0, a - 2), min(windows, b + 2)
-            values = rain[part.start + lo * hours:part.start + hi * hours].astype("float64")
+            values = rain[part.start + lo * hours : part.start + hi * hours].astype("float64")
             totals = values.reshape(-1, hours, *rain.shape[1:]).sum(1)
             cumulative = np.concatenate([np.zeros_like(totals[:1]), totals.cumsum(0)])
             interpolator = PchipInterpolator(np.arange(len(cumulative)) * hours, cumulative, axis=0, extrapolate=False)
             steps = np.arange((a - lo) * hours, (b - lo) * hours + 1)
-            result[part.start + a * hours:part.start + b * hours] = np.maximum(np.diff(interpolator(steps), axis=0), 0)
+            result[part.start + a * hours : part.start + b * hours] = np.maximum(
+                np.diff(interpolator(steps), axis=0), 0
+            )
     return result
 
 
@@ -69,20 +72,27 @@ def context_inputs(ds):
         if len(names) > 1:
             # Endpoint atmospheric states. The initial endpoint is unavailable
             # in legacy packs, so hold the first state over that edge interval.
-            states = np.concatenate([windows[a:a + 1, 1:], windows[a:b, 1:]])
+            states = np.concatenate([windows[a : a + 1, 1:], windows[a:b, 1:]])
             path = PchipInterpolator(np.arange(len(states)) * hours, states, axis=0, extrapolate=False)
             main[part, 1:] = path(np.arange(1, length + 1))
         index = np.arange(length)
         before[part] = main[part][np.maximum(index - hours, 0)]
         after[part] = main[part][np.minimum(index + hours, length - 1)]
-        past_weight[part] = np.clip((index + .5) / hours, 0, 1)
-        future_weight[part] = np.clip((length - index - .5) / hours, 0, 1)
+        past_weight[part] = np.clip((index + 0.5) / hours, 0, 1)
+        future_weight[part] = np.clip((length - index - 0.5) / hours, 0, 1)
     shape = (len(raw), 1, *raw.shape[-2:])
-    extras = [np.broadcast_to(past_weight[:, None, None, None], shape),
-              np.broadcast_to(future_weight[:, None, None, None], shape)]
+    extras = [
+        np.broadcast_to(past_weight[:, None, None, None], shape),
+        np.broadcast_to(future_weight[:, None, None, None], shape),
+    ]
     values = np.concatenate([main, *extras, before, after], axis=1).astype("float32")
-    feature_names = [*names, "past_context_weight", "future_context_weight",
-                     *[f"previous_{v}" for v in names], *[f"next_{v}" for v in names]]
+    feature_names = [
+        *names,
+        "past_context_weight",
+        "future_context_weight",
+        *[f"previous_{v}" for v in names],
+        *[f"next_{v}" for v in names],
+    ]
     return values, feature_names
 
 
@@ -98,8 +108,10 @@ def trajectory_noise(times, members, height, width, factor=8, hours=6, generator
     for part in segments(times, hours):
         length = part.stop - part.start
         anchors = torch.randn(length // hours + 1, members, 1, nh, nw, generator=generator)
-        position = (torch.arange(length, dtype=torch.float32) + .5) / hours
+        position = (torch.arange(length, dtype=torch.float32) + 0.5) / hours
         left = position.floor().long()
         weight = (position - left)[:, None, None, None, None]
-        result[part] = (anchors[left] * (1 - weight) + anchors[left + 1] * weight) / torch.sqrt((1 - weight) ** 2 + weight ** 2)
+        result[part] = (anchors[left] * (1 - weight) + anchors[left + 1] * weight) / torch.sqrt(
+            (1 - weight) ** 2 + weight**2
+        )
     return result
